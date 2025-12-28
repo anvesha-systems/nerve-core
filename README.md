@@ -29,7 +29,7 @@ This repository intentionally contains no business logic (search relevance, AI r
 These are intentionally handled above this layer.
 
 ## Architecture
-
+```
 Client
   │
   │  (Unix Domain Socket)
@@ -52,7 +52,7 @@ Client
 │  └───────────────┘  │
 │                     │
 └─────────────────────┘
-
+```
 All protocol framing, encoding, decoding, and lifecycle rules are defined in the separate nerve-protocol crate.
 
 ## Repository Structure
@@ -139,7 +139,6 @@ Reliability, correctness, and testability matter more than features at this laye
 
 ## License
 
-[Specify license here]
 
 ## Status
 
