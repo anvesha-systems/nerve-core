@@ -14,7 +14,7 @@ fn send_cancel_message() {
     
     let socket_path_clone = socket_path.to_string();
     let _server_handle = thread::spawn(move || {
-        nerve_core::server::run_server(&socket_path_clone)
+        nerve_core::server::run(&socket_path_clone)
     });
     
     thread::sleep(Duration::from_millis(50));
@@ -67,7 +67,7 @@ fn cancel_nonexistent_request() {
     
     let socket_path_clone = socket_path.to_string();
     let _server_handle = thread::spawn(move || {
-        nerve_core::server::run_server(&socket_path_clone)
+        nerve_core::server::run(&socket_path_clone)
     });
     
     thread::sleep(Duration::from_millis(50));

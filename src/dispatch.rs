@@ -12,25 +12,35 @@ pub enum DispatchResult {
     NoReply,
 }
 
+// disapatch single decode frame
+
+// this fn must be fast, non-blocking, and deterministic
+
 pub fn dispatch_frame(
     stream: &mut UnixStream,
     frame: Frame<'_>,
 ) -> Result<(), ProtocolError>{
     match frame.header.msg_type {
-        x if x == nerve_protocol::types::MessageType::Ping as u8 =>{
-            // echo ping
-            stream.write_all(
-                &nerve_protocol::codec::encode(
-                    nerve_protocol::types::MessageType::Ping,
-                    nerve_protocol::types::FrameFlags::empty(),
-                    nerve_protocol::types::RequestId(frame.header.request_id), 
-                    frame.payload,
-                ).unwrap()
-            ).unwrap();
+        x if x == MessageType::Ping as u8 =>{
+            handle_ping(stream, frame)?;
         }
+
+        // unknown or unsupported msg types:
+        // In v0.1.0 we simple ignore them
         _ => {
-            // ignore for now
+            // no op
         }
     }
     Ok(())
+}
+
+fn handle_ping(stream: &mut UnixStream, frame: Frame<'_>)->Result<(), ProtocolError>{
+    let response = encode(
+        MessageType::Ping, FrameFlags::empty(), RequestId(frame.header.request_id), frame.payload)?;
+
+        stream.write_all(&response)
+            .map_err(|_| ProtocolError::new(
+                nerve_protocol::types::ProtocolErrorKind::InternalError
+            ))?;
+        Ok(())
 }

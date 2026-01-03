@@ -6,5 +6,5 @@ fn main()-> std::io::Result<()> {
     let socket_path = "/tmp/nerve.sock";
     info!("starting NERVE core");
 
-    nerve_core::server::run_server(socket_path)
+    nerve_core::server::run(socket_path)
 }

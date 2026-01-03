@@ -1,3 +1,7 @@
+// TODO(v0.2): Distinguish clean EOF (client disconnect)
+// from malformed frames to avoid noisy logs.
+// read_exact returns UnexpectedEof when client closes connection normally.
+
 use core::borrow;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -20,6 +24,9 @@ use crate::dispatch::{dispatch_frame, DispatchResult};
 /// - protocol error occurs
 /// - shutdown is requested
 /// 
+/// 
+/// // TODO(v0.2): Suppress logging for clean connection shutdowns (EOF)
+// once read_frame differentiates EOF vs protocol errors.
 pub fn handle_connection(mut stream: UnixStream){
     loop{
         match read_frame(&mut stream){
