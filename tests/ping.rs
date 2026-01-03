@@ -17,7 +17,7 @@ fn ping_roundtrip() {
     // Start server in background thread
     let socket_path_clone = socket_path.to_string();
     let server_handle = thread::spawn(move || {
-        nerve_core::server::run(&socket_path_clone)
+        nerve_core::server::run_server(&socket_path_clone)
     });
     
     // Give server time to start
@@ -60,7 +60,7 @@ fn multiple_pings() {
     
     let socket_path_clone = socket_path.to_string();
     let _server_handle = thread::spawn(move || {
-        nerve_core::server::run(&socket_path_clone)
+        nerve_core::server::run_server(&socket_path_clone)
     });
     
     thread::sleep(Duration::from_millis(50));

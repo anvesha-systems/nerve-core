@@ -1,3 +1,7 @@
+use std::io::{Write, empty};
+use std::os::unix::net::UnixStream;
+
+use nerve_protocol::{Frame, ProtocolError};
 use nerve_protocol::codec::encode;
 use nerve_protocol::frame::OwnedFrame;
 use nerve_protocol::request::RequestTable;
@@ -9,48 +13,24 @@ pub enum DispatchResult {
 }
 
 pub fn dispatch_frame(
-    requests: &mut RequestTable,
-    frame: OwnedFrame,
-) -> DispatchResult {
-    let msg_type = match MessageType::try_from(frame.header.msg_type) {
-        Ok(t) => t,
-        Err(_) => return DispatchResult::NoReply,
-    };
-
-    match msg_type {
-        MessageType::Ping => {
-            let reply = encode(
-                MessageType::Ping,
-                FrameFlags::FINAL,
-                RequestId(frame.header.request_id),
-                &[],
-            )
-            .expect("encode ping");
-
-            DispatchResult::Reply(reply)
+    stream: &mut UnixStream,
+    frame: Frame<'_>,
+) -> Result<(), ProtocolError>{
+    match frame.header.msg_type {
+        x if x == nerve_protocol::types::MessageType::Ping as u8 =>{
+            // echo ping
+            stream.write_all(
+                &nerve_protocol::codec::encode(
+                    nerve_protocol::types::MessageType::Ping,
+                    nerve_protocol::types::FrameFlags::empty(),
+                    nerve_protocol::types::RequestId(frame.header.request_id), 
+                    frame.payload,
+                ).unwrap()
+            ).unwrap();
         }
-
-        MessageType::Cancel => {
-            requests.cancel(RequestId(frame.header.request_id));
-            DispatchResult::NoReply
+        _ => {
+            // ignore for now
         }
-
-        MessageType::SearchQuery => {
-            let id = RequestId(frame.header.request_id);
-            requests.start(id);
-
-            let reply = encode(
-                MessageType::SearchResult,
-                FrameFlags::FINAL,
-                id,
-                b"stub-result",
-            )
-            .expect("encode search result");
-
-            requests.complete(id);
-            DispatchResult::Reply(reply)
-        }
-
-        _ => DispatchResult::NoReply,
     }
+    Ok(())
 }

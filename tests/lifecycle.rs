@@ -3,10 +3,13 @@ use std::io::{Read, Write};
 use std::thread;
 use std::time::Duration;
 
-use nerve_protocol::codec::{encode, decode};
+use nerve_protocol::codec::{decode, encode};
 use nerve_protocol::types::{FrameFlags, MessageType, RequestId};
 
+use nerve_core::connection::read_frame;
+
 #[test]
+
 fn search_query_lifecycle() {
     let socket_path = "/tmp/nerve_test_search.sock";
     
@@ -14,7 +17,7 @@ fn search_query_lifecycle() {
     
     let socket_path_clone = socket_path.to_string();
     let _server_handle = thread::spawn(move || {
-        nerve_core::server::run(&socket_path_clone)
+        nerve_core::server::run_server(&socket_path_clone)
     });
     
     thread::sleep(Duration::from_millis(50));
@@ -69,7 +72,7 @@ fn multiple_requests_different_ids() {
     
     let socket_path_clone = socket_path.to_string();
     let _server_handle = thread::spawn(move || {
-        nerve_core::server::run(&socket_path_clone)
+        nerve_core::server::run_server(&socket_path_clone)
     });
     
     thread::sleep(Duration::from_millis(50));
@@ -135,7 +138,7 @@ fn connection_lifecycle() {
     
     let socket_path_clone = socket_path.to_string();
     let _server_handle = thread::spawn(move || {
-        nerve_core::server::run(&socket_path_clone)
+        nerve_core::server::run_server(&socket_path_clone)
     });
     
     thread::sleep(Duration::from_millis(50));
@@ -161,4 +164,33 @@ fn connection_lifecycle() {
     thread::sleep(Duration::from_millis(10));
     
     let _ = std::fs::remove_file(socket_path);
+}
+
+
+
+#[test]
+fn socket_read_frame_roundtrip() {
+    let (mut client, mut server) = UnixStream::pair().unwrap();
+
+    let payload = b"hello nerve";
+    let encoded = encode(
+        MessageType::Ping,
+        FrameFlags::empty(),
+        RequestId(7),
+        payload,
+    )
+    .unwrap();
+
+    // write from "client"
+    thread::spawn(move || {
+        client.write_all(&encoded).unwrap();
+    });
+
+    // read on "server"
+    let owned = read_frame(&mut server).expect("read_frame failed");
+
+    let frame = owned.as_borrowed();
+
+    assert_eq!(frame.header.request_id, 7);
+    assert_eq!(frame.payload, payload);
 }

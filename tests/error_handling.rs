@@ -11,7 +11,7 @@ fn connection_closed_gracefully() {
     
     let socket_path_clone = socket_path.to_string();
     let _server_handle = thread::spawn(move || {
-        nerve_core::server::run(&socket_path_clone)
+        nerve_core::server::run_server(&socket_path_clone)
     });
     
     thread::sleep(Duration::from_millis(50));
@@ -34,7 +34,7 @@ fn malformed_data_closes_connection() {
     
     let socket_path_clone = socket_path.to_string();
     let _server_handle = thread::spawn(move || {
-        nerve_core::server::run(&socket_path_clone)
+        nerve_core::server::run_server(&socket_path_clone)
     });
     
     thread::sleep(Duration::from_millis(50));
@@ -64,7 +64,7 @@ fn empty_write_handling() {
     
     let socket_path_clone = socket_path.to_string();
     let _server_handle = thread::spawn(move || {
-        nerve_core::server::run(&socket_path_clone)
+        nerve_core::server::run_server(&socket_path_clone)
     });
     
     thread::sleep(Duration::from_millis(50));
@@ -88,7 +88,7 @@ fn partial_frame_handling() {
     
     let socket_path_clone = socket_path.to_string();
     let _server_handle = thread::spawn(move || {
-        nerve_core::server::run(&socket_path_clone)
+        nerve_core::server::run_server(&socket_path_clone)
     });
     
     thread::sleep(Duration::from_millis(50));
@@ -115,7 +115,7 @@ fn rapid_connect_disconnect() {
     let socket_path_clone = socket_path.to_string();
     let _server_handle = thread::spawn(move || {
         // Server accepts one connection at a time in v0.1
-        nerve_core::server::run(&socket_path_clone)
+        nerve_core::server::run_server(&socket_path_clone)
     });
     
     thread::sleep(Duration::from_millis(50));
@@ -142,7 +142,7 @@ fn socket_already_exists() {
     // Server should remove and recreate it
     let socket_path_clone = socket_path.to_string();
     let server_handle = thread::spawn(move || {
-        nerve_core::server::run(&socket_path_clone)
+        nerve_core::server::run_server(&socket_path_clone)
     });
     
     thread::sleep(Duration::from_millis(50));
