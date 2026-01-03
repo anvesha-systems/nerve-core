@@ -2,19 +2,16 @@
 // from malformed frames to avoid noisy logs.
 // read_exact returns UnexpectedEof when client closes connection normally.
 
-use core::borrow;
-use std::io::{Read, Write};
+use std::io::{Read};
 use std::os::unix::net::UnixStream;
 
 use nerve_protocol::constants::HEADER_SIZE;
-use nerve_protocol::{Frame, ProtocolError};
-use nerve_protocol::codec::decode;
+use nerve_protocol::{ProtocolError};
 
-use nerve_protocol::io::{FrameReader};
-use nerve_protocol::frame::{self, OwnedFrame};
-use nerve_protocol::request::RequestTable;
+use nerve_protocol::frame::{OwnedFrame};
 
-use crate::dispatch::{dispatch_frame, DispatchResult};
+use crate::dispatch::{dispatch_frame};
+use crate::request_table::RequestTable;
 
 
 /// Handle a single client connection.
