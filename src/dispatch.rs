@@ -22,11 +22,11 @@ pub fn dispatch_frame(
     requests: &mut RequestTable
 ) -> Result<(), ProtocolError>{
     match frame.header.msg_type {
-        x if x == MessageType::Ping as u8 =>{
+        x if x == MessageType::Ping as u8 => {
             handle_ping(stream, frame)?;
         }
 
-        x if x == MessageType::Cancel as u8 =>{
+        x if x == MessageType::Cancel as u8 => {
             handle_cancel(frame, requests);
         }
 
@@ -34,7 +34,7 @@ pub fn dispatch_frame(
             handle_searchquery(stream, frame, requests)?;
         }
 
-        x if x == MessageType::AgentTaskStart as u8 =>{
+        x if x == MessageType::AgentTaskStart as u8 => {
             handle_agent_task_start(frame, requests)?;
         }
 
