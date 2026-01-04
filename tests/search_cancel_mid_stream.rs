@@ -83,7 +83,7 @@ fn cancel_stops_streaming_immediately() {
     // No further frames should arrive
     let mut buf = [0u8; 1];
     let res = stream.read(&mut buf);
-    
+
     // NOTE: Cancellation is cooperative; in-flight frames may arrive.
     // Guaranteed: no FINAL frame after cancel.
     assert!(res.is_err() || res.is_ok());
