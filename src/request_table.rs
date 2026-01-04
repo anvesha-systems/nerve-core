@@ -80,7 +80,7 @@ impl RequestTable{
         self.requests.is_empty()
     }
 
-    // contains{
+    // check if a request exists in the table
     pub fn contains(&self, request_id: RequestId) -> bool {
         self.requests.contains_key(&request_id)
     }
