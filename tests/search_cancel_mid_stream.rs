@@ -87,4 +87,7 @@ fn cancel_stops_streaming_immediately() {
     // NOTE: Cancellation is cooperative; in-flight frames may arrive.
     // Guaranteed: no FINAL frame after cancel.
     assert!(res.is_err() || res.is_ok());
+    
+    drop(stream);
+    let _ = std::fs::remove_file(SOCKET_PATH);
 }
