@@ -89,4 +89,9 @@ fn cancel_stops_streaming_immediately() {
     // Any Result here (timeout, EOF, or extra data) is acceptable under the
     // cooperative cancellation semantics, so we just ensure the read completes.
     let _ = res;
+
+    // Cleanup: remove socket file after test completes
+    if Path::new(SOCKET_PATH).exists() {
+        std::fs::remove_file(SOCKET_PATH).unwrap();
+    }
 }
