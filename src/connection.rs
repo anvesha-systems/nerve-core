@@ -11,7 +11,6 @@ use nerve_protocol::{ProtocolError};
 use nerve_protocol::frame::{OwnedFrame};
 
 use crate::dispatch::{dispatch_frame};
-use crate::request_table::{self, RequestTable};
 
 
 /// Handle a single client connection.

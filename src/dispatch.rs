@@ -1,11 +1,11 @@
-use std::io::{Write, empty};
+use std::io::{Write};
 use std::os::unix::net::UnixStream;
 
-use nerve_protocol::{Frame, ProtocolError, request};
+use nerve_protocol::{Frame, ProtocolError };
 use nerve_protocol::codec::encode;
-use nerve_protocol::frame::OwnedFrame;
 use nerve_protocol::types::{FrameFlags, MessageType, RequestId};
 
+use crate::worker_client::WorkerClient;
 use crate::request_table::RequestTable;
 pub enum DispatchResult {
     Reply(Vec<u8>),
@@ -137,5 +137,71 @@ fn handle_agent_task_done(frame: Frame<'_>, requests: &mut RequestTable) -> Resu
     let req_id = RequestId(frame.header.request_id);
 
     requests.remove(req_id);
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn route_to_worker(
+    client_stream: &mut UnixStream,
+    frame: Frame<'_>,
+    requests: &mut RequestTable,
+    worker: &mut WorkerClient,
+) -> Result<(), ProtocolError> {
+    let req_id = RequestId(frame.header.request_id);
+    let _ = requests.insert(req_id);
+
+    // forward frame as-is
+    let msg_type = MessageType::try_from(frame.header.msg_type)
+        .map_err(|_| ProtocolError::new(
+            nerve_protocol::types::ProtocolErrorKind::InternalError,
+        ))?;
+
+    let raw = encode(
+        msg_type,
+        FrameFlags::from_bits_truncate(frame.header.flags),
+        req_id,
+        frame.payload,
+    )?;
+    worker.send_raw(&raw)?;
+
+    loop {
+        if requests.is_cancelled(req_id) {
+            let cancel = encode(
+                MessageType::Cancel,
+                FrameFlags::empty(),
+                req_id,
+                &[],
+            )?;
+            let _ = worker.send_raw(&cancel);
+            requests.remove(req_id);
+            return Ok(());
+        }
+
+        let wf = worker.read_frame()?;
+        let flags = FrameFlags::from_bits_truncate(wf.header.flags);
+
+        let msg_type = MessageType::try_from(wf.header.msg_type)
+            .map_err(|_| ProtocolError::new(
+                nerve_protocol::types::ProtocolErrorKind::InternalError,
+            ))?;
+
+        let out = encode(
+            msg_type,
+            flags,
+            req_id,
+            &wf.payload,
+        )?;
+
+        client_stream.write_all(&out)
+            .map_err(|_| ProtocolError::new(
+                nerve_protocol::types::ProtocolErrorKind::InternalError
+            ))?;
+
+        if flags.contains(FrameFlags::FINAL) {
+            requests.remove(req_id);
+            break;
+        }
+    }
+
     Ok(())
 }

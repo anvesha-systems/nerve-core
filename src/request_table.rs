@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use nerve_protocol::{request, types::RequestId};
+use nerve_protocol::types::RequestId;
 
 // state of request inside the core
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
