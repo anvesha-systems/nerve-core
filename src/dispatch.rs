@@ -12,46 +12,55 @@ pub enum DispatchResult {
     NoReply,
 }
 
+pub enum DispatchAction<'a> {
+    Handled,
+    RouteToSearchWorker(Frame<'a>),
+    Cancelled(RequestId)
+}
 // disapatch single decode frame
 
 // this fn must be fast, non-blocking, and deterministic
 
-pub fn dispatch_frame(
+pub fn dispatch_frame<'a>(
     stream: &mut UnixStream,
-    frame: Frame<'_>,
-    requests: &mut RequestTable
-) -> Result<(), ProtocolError>{
+    frame: Frame<'a>,
+    requests: &mut RequestTable,
+) -> Result<DispatchAction<'a>, ProtocolError> {
     match frame.header.msg_type {
-        x if x == MessageType::Ping as u8 =>{
+        x if x == MessageType::Ping as u8 => {
             handle_ping(stream, frame)?;
+            Ok(DispatchAction::Handled)
         }
 
-        x if x == MessageType::Cancel as u8 =>{
+        x if x == MessageType::Cancel as u8 => {
+            let req_id = RequestId(frame.header.request_id);
             handle_cancel(frame, requests);
+            Ok(DispatchAction::Cancelled(req_id))
         }
 
+        // ONLY CHANGE: SearchQuery is no longer handled inline
         x if x == MessageType::SearchQuery as u8 => {
-            handle_searchquery(stream, frame, requests)?;
+            Ok(DispatchAction::RouteToSearchWorker(frame))
         }
 
-        x if x == MessageType::AgentTaskStart as u8 =>{
+        x if x == MessageType::AgentTaskStart as u8 => {
             handle_agent_task_start(frame, requests)?;
+            Ok(DispatchAction::Handled)
         }
 
         x if x == MessageType::AgentTaskEvent as u8 => {
             handle_agent_task_event(frame, requests)?;
+            Ok(DispatchAction::Handled)
         }
 
         x if x == MessageType::AgentTaskDone as u8 => {
             handle_agent_task_done(frame, requests)?;
+            Ok(DispatchAction::Handled)
         }
-        // unknown or unsupported msg types:
-        // In v0.1.0 we simple ignore them
-        _ => {
-            // no op
-        }
+
+        // unknown / unsupported → ignore
+        _ => Ok(DispatchAction::Handled),
     }
-    Ok(())
 }
 
 fn handle_ping(stream: &mut UnixStream, frame: Frame<'_>)->Result<(), ProtocolError>{
@@ -140,8 +149,7 @@ fn handle_agent_task_done(frame: Frame<'_>, requests: &mut RequestTable) -> Resu
     Ok(())
 }
 
-#[allow(dead_code)]
-fn route_to_worker(
+pub fn route_to_worker(
     client_stream: &mut UnixStream,
     frame: Frame<'_>,
     requests: &mut RequestTable,
@@ -164,6 +172,8 @@ fn route_to_worker(
     )?;
     worker.send_raw(&raw)?;
 
+    let mut seen_final = false;
+
     loop {
         if requests.is_cancelled(req_id) {
             let cancel = encode(
@@ -177,7 +187,19 @@ fn route_to_worker(
             return Ok(());
         }
 
-        let wf = worker.read_frame()?;
+        let wf = match worker.read_frame() {
+            Ok(f) => f,
+
+            Err(e) => {
+                // ✅ EOF is OK only AFTER FINAL
+                if seen_final {
+                    return Ok(());
+                }
+                // ❌ otherwise this is a real error
+                return Err(e);
+            }
+        };
+
         let flags = FrameFlags::from_bits_truncate(wf.header.flags);
 
         let msg_type = MessageType::try_from(wf.header.msg_type)
@@ -198,10 +220,10 @@ fn route_to_worker(
             ))?;
 
         if flags.contains(FrameFlags::FINAL) {
+            seen_final = true;
             requests.remove(req_id);
-            break;
+            // IMPORTANT: do NOT return here
+            // let EOF end the loop cleanly
         }
     }
-
-    Ok(())
 }

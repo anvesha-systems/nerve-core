@@ -3,14 +3,15 @@
 // read_exact returns UnexpectedEof when client closes connection normally.
 
 use std::io::{Read};
-use std::os::unix::net::UnixStream;
+use std::os::unix::net::{UnixStream};
 
 use nerve_protocol::constants::HEADER_SIZE;
-use nerve_protocol::{ProtocolError};
+use nerve_protocol::{ProtocolError, frame};
 
 use nerve_protocol::frame::{OwnedFrame};
 
-use crate::dispatch::{dispatch_frame};
+use crate::dispatch::{dispatch_frame, DispatchAction};
+use crate::worker_client::WorkerClient;
 
 
 /// Handle a single client connection.
@@ -23,20 +24,27 @@ use crate::dispatch::{dispatch_frame};
 /// 
 /// // TODO(v0.2): Suppress logging for clean connection shutdowns (EOF)
 // once read_frame differentiates EOF vs protocol errors.
-pub fn handle_connection(mut stream: UnixStream){
+pub fn handle_connection(mut stream: UnixStream) -> Result<(), ProtocolError> {
     let mut requests = crate::request_table::RequestTable::new();
-    loop{
-        let owned = match read_frame(&mut stream){
-            Ok(f) => f,
-            Err(_) => break, //v0.1 exit on error/EOF
-        };
+    
+    // hard coded worker socket
 
+    let mut search_worker = WorkerClient::connect("/tmp/nerve-search-worker.sock")
+        .expect("failed to connect to search worker");
+
+    loop {
+        let owned = read_frame(&mut stream)?;
         let frame = owned.as_borrowed();
 
-        if let Err(_) = dispatch_frame(&mut stream, frame, &mut requests){
-            break;
+        let action = dispatch_frame(&mut stream, frame, &mut requests)?;
+
+        match action {
+            DispatchAction::Handled => {}
+            DispatchAction::RouteToSearchWorker(frame) => { /* routing */ }
+            DispatchAction::Cancelled(_) => {}
         }
     }
+
     // implicit close on drop
 }
 pub fn read_frame(stream: &mut UnixStream) -> Result<OwnedFrame, ProtocolError> {
@@ -75,3 +83,4 @@ pub fn read_frame(stream: &mut UnixStream) -> Result<OwnedFrame, ProtocolError> 
 fn log_protocol_error(err: ProtocolError){
     eprintln!("NERVE protocol error : {}",err)
 }
+
