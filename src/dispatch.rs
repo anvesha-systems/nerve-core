@@ -4,9 +4,9 @@ use std::os::unix::net::UnixStream;
 use nerve_protocol::{Frame, ProtocolError};
 use nerve_protocol::codec::encode;
 use nerve_protocol::frame::OwnedFrame;
-use nerve_protocol::request::RequestTable;
 use nerve_protocol::types::{FrameFlags, MessageType, RequestId};
 
+use crate::request_table::RequestTable;
 pub enum DispatchResult {
     Reply(Vec<u8>),
     NoReply,
@@ -19,12 +19,16 @@ pub enum DispatchResult {
 pub fn dispatch_frame(
     stream: &mut UnixStream,
     frame: Frame<'_>,
+    requests: &mut RequestTable
 ) -> Result<(), ProtocolError>{
     match frame.header.msg_type {
         x if x == MessageType::Ping as u8 =>{
             handle_ping(stream, frame)?;
         }
 
+        x if x == MessageType::Cancel as u8 =>{
+            handle_cancel(frame, requests);
+        }
         // unknown or unsupported msg types:
         // In v0.1.0 we simple ignore them
         _ => {
@@ -43,4 +47,9 @@ fn handle_ping(stream: &mut UnixStream, frame: Frame<'_>)->Result<(), ProtocolEr
                 nerve_protocol::types::ProtocolErrorKind::InternalError
             ))?;
         Ok(())
+}
+
+fn handle_cancel(frame: Frame<'_>, requests: &mut RequestTable){
+    let req_id = RequestId(frame.header.request_id);
+    requests.cancel(req_id);
 }

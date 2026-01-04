@@ -11,7 +11,7 @@ use nerve_protocol::{ProtocolError};
 use nerve_protocol::frame::{OwnedFrame};
 
 use crate::dispatch::{dispatch_frame};
-use crate::request_table::RequestTable;
+use crate::request_table::{self, RequestTable};
 
 
 /// Handle a single client connection.
@@ -25,19 +25,17 @@ use crate::request_table::RequestTable;
 /// // TODO(v0.2): Suppress logging for clean connection shutdowns (EOF)
 // once read_frame differentiates EOF vs protocol errors.
 pub fn handle_connection(mut stream: UnixStream){
+    let mut requests = crate::request_table::RequestTable::new();
     loop{
-        match read_frame(&mut stream){
-            Ok(frame) => {
-                let borrowed = frame.as_borrowed();
-                if let Err(e) = dispatch_frame((&mut stream), borrowed){
-                    log_protocol_error(e);
-                    break;
-                }
-            }
-            Err(e) => {
-                log_protocol_error(e);
-                break;
-            }
+        let owned = match read_frame(&mut stream){
+            Ok(f) => f,
+            Err(_) => break, //v0.1 exit on error/EOF
+        };
+
+        let frame = owned.as_borrowed();
+
+        if let Err(_) = dispatch_frame(&mut stream, frame, &mut requests){
+            break;
         }
     }
     // implicit close on drop
