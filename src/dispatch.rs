@@ -118,7 +118,7 @@ fn handle_searchquery(stream: &mut UnixStream, frame: Frame<'_>, requests: &mut 
 
 // stub handlers
 fn handle_agent_task_start(
-    frame: Frame<'_>, requests: &mut RequestTable,) -> Result<(), ProtocolError> {
+    frame: Frame<'_>, requests: &mut RequestTable) -> Result<(), ProtocolError> {
     let req_id = RequestId(frame.header.request_id);
 
     // register task lifecycle
