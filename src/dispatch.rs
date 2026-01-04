@@ -1,7 +1,7 @@
 use std::io::{Write, empty};
 use std::os::unix::net::UnixStream;
 
-use nerve_protocol::{Frame, ProtocolError};
+use nerve_protocol::{Frame, ProtocolError, request};
 use nerve_protocol::codec::encode;
 use nerve_protocol::frame::OwnedFrame;
 use nerve_protocol::types::{FrameFlags, MessageType, RequestId};
@@ -61,42 +61,44 @@ fn handle_cancel(frame: Frame<'_>, requests: &mut RequestTable){
 fn handle_searchquery(stream: &mut UnixStream, frame: Frame<'_>, requests: &mut RequestTable) -> Result<(), ProtocolError>{
     let req_id = RequestId(frame.header.request_id);
 
-    eprintln!(
-        "SEARCH_QUERY received, req_id={}",
-        frame.header.request_id
-    );
-
     // register request
-    if !requests.insert(req_id) {
-        // duplicate request_id =-> ignore for v0.1
-        return Ok(());
+
+    let _ = requests.insert(req_id);
+
+    // stub search chunk
+    let chunks = [
+        b"result chunk 1",
+        b"result chunk 2",
+        b"result chunk 3",
+    ];
+
+    for (i, chunk) in chunks.iter().enumerate() {
+        // cancellation guard before emit
+        if requests.is_cancelled(req_id) {
+            requests.remove(req_id);
+            return Ok(());
+        }
+
+        let is_final = i == chunks.len() -1 ;
+
+        let flags = if is_final{
+            FrameFlags::FINAL
+        }else {
+            FrameFlags::STREAM
+        };
+        let frame = encode(
+            MessageType::SearchResult,
+            flags,
+            req_id,
+            *chunk,
+        )?;
+
+        stream.write_all(&frame)
+            .map_err(|_| ProtocolError::new(
+                nerve_protocol::types::ProtocolErrorKind::InternalError
+            ))?;
     }
 
-    let stub_result = b"stub-search-result";
-
-    // fuard cancellation before emitting
-    if requests.is_cancelled(req_id) {
-        requests.remove(req_id);
-        return  Ok(());
-    }
-
-    // emit a search result frame with the stub payload
-    let response = encode(MessageType::SearchResult, FrameFlags::FINAL, req_id, stub_result)?;
-
-    eprintln!(
-        "Emitting SEARCH_RESULT, req_id={}",
-        frame.header.request_id
-    );
-
-    stream.write_all(&response)
-        .map_err(|_| ProtocolError::new(
-            nerve_protocol::types::ProtocolErrorKind::InternalError
-        ))?;
-
-    eprintln!("SEARCH_RESULT written to socket");
-
-    
-    // request complete
     requests.remove(req_id);
 
     Ok(())
