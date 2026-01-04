@@ -79,4 +79,14 @@ impl RequestTable{
     pub fn is_empty(&self) -> bool {
         self.requests.is_empty()
     }
+
+    // check if a request exists in the table
+    pub fn contains(&self, request_id: RequestId) -> bool {
+        self.requests.contains_key(&request_id)
+    }
+
+    // is active request
+    pub fn is_active(&self, request_id: RequestId) -> bool {
+        matches!(self.requests.get(&request_id), Some(RequestState::Active))
+    }
 }

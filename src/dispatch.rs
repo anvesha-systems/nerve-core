@@ -55,7 +55,7 @@ fn handle_ping(stream: &mut UnixStream, frame: Frame<'_>)->Result<(), ProtocolEr
 
 fn handle_cancel(frame: Frame<'_>, requests: &mut RequestTable){
     let req_id = RequestId(frame.header.request_id);
-    requests.cancel(req_id);
+    let _ = requests.cancel(req_id);
 }
 
 fn handle_searchquery(stream: &mut UnixStream, frame: Frame<'_>, requests: &mut RequestTable) -> Result<(), ProtocolError>{
