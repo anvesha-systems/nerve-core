@@ -48,4 +48,6 @@ fn agent_task_lifecycle_is_accepted() {
     ).unwrap();
 
     stream.write_all(&done).unwrap();
+
+    std::fs::remove_file(SOCKET_PATH).unwrap();
 }
