@@ -22,16 +22,28 @@ pub fn dispatch_frame(
     requests: &mut RequestTable
 ) -> Result<(), ProtocolError>{
     match frame.header.msg_type {
-        x if x == MessageType::Ping as u8 =>{
+        x if x == MessageType::Ping as u8 => {
             handle_ping(stream, frame)?;
         }
 
-        x if x == MessageType::Cancel as u8 =>{
+        x if x == MessageType::Cancel as u8 => {
             handle_cancel(frame, requests);
         }
 
         x if x == MessageType::SearchQuery as u8 => {
             handle_searchquery(stream, frame, requests)?;
+        }
+
+        x if x == MessageType::AgentTaskStart as u8 => {
+            handle_agent_task_start(frame, requests)?;
+        }
+
+        x if x == MessageType::AgentTaskEvent as u8 => {
+            handle_agent_task_event(frame, requests)?;
+        }
+
+        x if x == MessageType::AgentTaskDone as u8 => {
+            handle_agent_task_done(frame, requests)?;
         }
         // unknown or unsupported msg types:
         // In v0.1.0 we simple ignore them
@@ -101,5 +113,29 @@ fn handle_searchquery(stream: &mut UnixStream, frame: Frame<'_>, requests: &mut 
 
     requests.remove(req_id);
 
+    Ok(())
+}
+
+// stub handlers
+fn handle_agent_task_start(
+    frame: Frame<'_>, requests: &mut RequestTable) -> Result<(), ProtocolError> {
+    let req_id = RequestId(frame.header.request_id);
+
+    // register task lifecycle
+    let _ = requests.insert(req_id);
+
+    // No execution in v0.1
+    Ok(())
+}
+
+fn handle_agent_task_event (_frame: Frame<'_>, _requests: &RequestTable) -> Result<(), ProtocolError> {
+    // stub : events will be forwarded later
+    Ok(())
+}
+
+fn handle_agent_task_done(frame: Frame<'_>, requests: &mut RequestTable) -> Result<(), ProtocolError> {
+    let req_id = RequestId(frame.header.request_id);
+
+    requests.remove(req_id);
     Ok(())
 }
