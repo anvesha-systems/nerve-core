@@ -1,7 +1,7 @@
 use std::io::{Write};
 use std::os::unix::net::UnixStream;
 
-use nerve_protocol::{Frame, ProtocolError };
+use nerve_protocol::{Frame, ProtocolError};
 use nerve_protocol::codec::encode;
 use nerve_protocol::types::{FrameFlags, MessageType, RequestId};
 
