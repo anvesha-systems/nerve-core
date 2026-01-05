@@ -29,8 +29,15 @@ pub fn handle_connection(mut stream: UnixStream) -> Result<(), ProtocolError> {
     
     // hard coded worker socket
 
-    let mut search_worker = WorkerClient::connect("/tmp/nerve-search-worker.sock")
-        .expect("failed to connect to search worker");
+    let mut search_worker = match WorkerClient::connect("/tmp/nerve-search-worker.sock") {
+        Ok(client) => client,
+        Err(e) => {
+            eprintln!("failed to connect to search worker: {}", e);
+            return Err(ProtocolError::new(
+                nerve_protocol::types::ProtocolErrorKind::MalformedFrame
+            ));
+        }
+    };
 
     loop {
         let owned = read_frame(&mut stream)?;
