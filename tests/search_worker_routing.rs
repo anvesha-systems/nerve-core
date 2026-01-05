@@ -295,7 +295,8 @@ fn start_fake_search_worker_timeout(path: &str) {
         stream.read_exact(&mut payload).unwrap();
 
         // ❌ NEVER respond - simulate timeout
-        std::thread::sleep(std::time::Duration::from_secs(5));
+        // Sleep just enough to ensure client timeout (3s) triggers
+        std::thread::sleep(std::time::Duration::from_secs(4));
     });
 }
 

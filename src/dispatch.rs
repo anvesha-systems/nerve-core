@@ -34,7 +34,7 @@ pub fn dispatch_frame<'a>(
 
         x if x == MessageType::Cancel as u8 => {
             let req_id = RequestId(frame.header.request_id);
-            handle_cancel(frame, requests);
+            handle_cancel(req_id, requests);
             Ok(DispatchAction::Cancelled(req_id))
         }
 
@@ -74,8 +74,7 @@ fn handle_ping(stream: &mut UnixStream, frame: Frame<'_>)->Result<(), ProtocolEr
         Ok(())
 }
 
-fn handle_cancel(frame: Frame<'_>, requests: &mut RequestTable){
-    let req_id = RequestId(frame.header.request_id);
+fn handle_cancel(req_id: RequestId, requests: &mut RequestTable){
     let _ = requests.cancel(req_id);
 }
 
