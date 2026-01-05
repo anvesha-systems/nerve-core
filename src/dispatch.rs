@@ -17,7 +17,7 @@ pub enum DispatchAction<'a> {
     RouteToSearchWorker(Frame<'a>),
     Cancelled(RequestId)
 }
-// disapatch single decode frame
+// dispatch single decode frame
 
 // this fn must be fast, non-blocking, and deterministic
 
