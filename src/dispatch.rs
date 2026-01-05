@@ -1,12 +1,12 @@
-use std::io::{Write};
+use std::io::Write;
 use std::os::unix::net::UnixStream;
 
-use nerve_protocol::{Frame, ProtocolError};
 use nerve_protocol::codec::encode;
 use nerve_protocol::types::{FrameFlags, MessageType, RequestId};
+use nerve_protocol::{Frame, ProtocolError};
 
-use crate::worker_client::WorkerClient;
 use crate::request_table::RequestTable;
+use crate::worker_client::WorkerClient;
 pub enum DispatchResult {
     Reply(Vec<u8>),
     NoReply,
@@ -15,7 +15,7 @@ pub enum DispatchResult {
 pub enum DispatchAction<'a> {
     Handled,
     RouteToSearchWorker(Frame<'a>),
-    Cancelled(RequestId)
+    Cancelled(RequestId),
 }
 // dispatch single decode frame
 
@@ -38,9 +38,7 @@ pub fn dispatch_frame<'a>(
         }
 
         // ONLY CHANGE: SearchQuery is no longer handled inline
-        x if x == MessageType::SearchQuery as u8 => {
-            Ok(DispatchAction::RouteToSearchWorker(frame))
-        }
+        x if x == MessageType::SearchQuery as u8 => Ok(DispatchAction::RouteToSearchWorker(frame)),
 
         x if x == MessageType::AgentTaskStart as u8 => {
             handle_agent_task_start(frame, requests)?;
@@ -62,23 +60,30 @@ pub fn dispatch_frame<'a>(
     }
 }
 
-fn handle_ping(stream: &mut UnixStream, frame: Frame<'_>)->Result<(), ProtocolError>{
+fn handle_ping(stream: &mut UnixStream, frame: Frame<'_>) -> Result<(), ProtocolError> {
     let response = encode(
-        MessageType::Ping, FrameFlags::empty(), RequestId(frame.header.request_id), frame.payload)?;
+        MessageType::Ping,
+        FrameFlags::empty(),
+        RequestId(frame.header.request_id),
+        frame.payload,
+    )?;
 
-        stream.write_all(&response)
-            .map_err(|_| ProtocolError::new(
-                nerve_protocol::types::ProtocolErrorKind::InternalError
-            ))?;
-        Ok(())
+    stream
+        .write_all(&response)
+        .map_err(|_| ProtocolError::new(nerve_protocol::types::ProtocolErrorKind::InternalError))?;
+    Ok(())
 }
 
-fn handle_cancel(frame: Frame<'_>, requests: &mut RequestTable){
+fn handle_cancel(frame: Frame<'_>, requests: &mut RequestTable) {
     let req_id = RequestId(frame.header.request_id);
     let _ = requests.cancel(req_id);
 }
 
-fn handle_searchquery(stream: &mut UnixStream, frame: Frame<'_>, requests: &mut RequestTable) -> Result<(), ProtocolError>{
+fn handle_searchquery(
+    stream: &mut UnixStream,
+    frame: Frame<'_>,
+    requests: &mut RequestTable,
+) -> Result<(), ProtocolError> {
     let req_id = RequestId(frame.header.request_id);
 
     // register request
@@ -86,11 +91,7 @@ fn handle_searchquery(stream: &mut UnixStream, frame: Frame<'_>, requests: &mut 
     let _ = requests.insert(req_id);
 
     // stub search chunk
-    let chunks = [
-        b"result chunk 1",
-        b"result chunk 2",
-        b"result chunk 3",
-    ];
+    let chunks = [b"result chunk 1", b"result chunk 2", b"result chunk 3"];
 
     for (i, chunk) in chunks.iter().enumerate() {
         // cancellation guard before emit
@@ -99,24 +100,18 @@ fn handle_searchquery(stream: &mut UnixStream, frame: Frame<'_>, requests: &mut 
             return Ok(());
         }
 
-        let is_final = i == chunks.len() -1 ;
+        let is_final = i == chunks.len() - 1;
 
-        let flags = if is_final{
+        let flags = if is_final {
             FrameFlags::FINAL
-        }else {
+        } else {
             FrameFlags::STREAM
         };
-        let frame = encode(
-            MessageType::SearchResult,
-            flags,
-            req_id,
-            *chunk,
-        )?;
+        let frame = encode(MessageType::SearchResult, flags, req_id, *chunk)?;
 
-        stream.write_all(&frame)
-            .map_err(|_| ProtocolError::new(
-                nerve_protocol::types::ProtocolErrorKind::InternalError
-            ))?;
+        stream.write_all(&frame).map_err(|_| {
+            ProtocolError::new(nerve_protocol::types::ProtocolErrorKind::InternalError)
+        })?;
     }
 
     requests.remove(req_id);
@@ -126,7 +121,9 @@ fn handle_searchquery(stream: &mut UnixStream, frame: Frame<'_>, requests: &mut 
 
 // stub handlers
 fn handle_agent_task_start(
-    frame: Frame<'_>, requests: &mut RequestTable) -> Result<(), ProtocolError> {
+    frame: Frame<'_>,
+    requests: &mut RequestTable,
+) -> Result<(), ProtocolError> {
     let req_id = RequestId(frame.header.request_id);
 
     // register task lifecycle
@@ -136,12 +133,18 @@ fn handle_agent_task_start(
     Ok(())
 }
 
-fn handle_agent_task_event (_frame: Frame<'_>, _requests: &RequestTable) -> Result<(), ProtocolError> {
+fn handle_agent_task_event(
+    _frame: Frame<'_>,
+    _requests: &RequestTable,
+) -> Result<(), ProtocolError> {
     // stub : events will be forwarded later
     Ok(())
 }
 
-fn handle_agent_task_done(frame: Frame<'_>, requests: &mut RequestTable) -> Result<(), ProtocolError> {
+fn handle_agent_task_done(
+    frame: Frame<'_>,
+    requests: &mut RequestTable,
+) -> Result<(), ProtocolError> {
     let req_id = RequestId(frame.header.request_id);
 
     requests.remove(req_id);
@@ -159,9 +162,7 @@ pub fn route_to_worker(
 
     // forward frame as-is
     let msg_type = MessageType::try_from(frame.header.msg_type)
-        .map_err(|_| ProtocolError::new(
-            nerve_protocol::types::ProtocolErrorKind::InternalError,
-        ))?;
+        .map_err(|_| ProtocolError::new(nerve_protocol::types::ProtocolErrorKind::InternalError))?;
 
     let raw = encode(
         msg_type,
@@ -175,12 +176,7 @@ pub fn route_to_worker(
 
     loop {
         if requests.is_cancelled(req_id) {
-            let cancel = encode(
-                MessageType::Cancel,
-                FrameFlags::empty(),
-                req_id,
-                &[],
-            )?;
+            let cancel = encode(MessageType::Cancel, FrameFlags::empty(), req_id, &[])?;
             let _ = worker.send_raw(&cancel);
             requests.remove(req_id);
             return Ok(());
@@ -201,22 +197,15 @@ pub fn route_to_worker(
 
         let flags = FrameFlags::from_bits_truncate(wf.header.flags);
 
-        let msg_type = MessageType::try_from(wf.header.msg_type)
-            .map_err(|_| ProtocolError::new(
-                nerve_protocol::types::ProtocolErrorKind::InternalError,
-            ))?;
+        let msg_type = MessageType::try_from(wf.header.msg_type).map_err(|_| {
+            ProtocolError::new(nerve_protocol::types::ProtocolErrorKind::InternalError)
+        })?;
 
-        let out = encode(
-            msg_type,
-            flags,
-            req_id,
-            &wf.payload,
-        )?;
+        let out = encode(msg_type, flags, req_id, &wf.payload)?;
 
-        client_stream.write_all(&out)
-            .map_err(|_| ProtocolError::new(
-                nerve_protocol::types::ProtocolErrorKind::InternalError
-            ))?;
+        client_stream.write_all(&out).map_err(|_| {
+            ProtocolError::new(nerve_protocol::types::ProtocolErrorKind::InternalError)
+        })?;
 
         if flags.contains(FrameFlags::FINAL) {
             seen_final = true;

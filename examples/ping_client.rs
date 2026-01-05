@@ -1,14 +1,13 @@
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 
-use nerve_protocol::codec::{encode, decode};
-use nerve_protocol::types::{MessageType, FrameFlags, RequestId};
+use nerve_protocol::codec::{decode, encode};
+use nerve_protocol::types::{FrameFlags, MessageType, RequestId};
 
 fn main() {
     let socket_path = "/tmp/nerve.sock";
 
-    let mut stream =
-        UnixStream::connect(socket_path).expect("failed to connect to nerve-core");
+    let mut stream = UnixStream::connect(socket_path).expect("failed to connect to nerve-core");
 
     let payload = b"ping-from-client";
 
@@ -31,5 +30,8 @@ fn main() {
 
     println!("Received response:");
     println!("request_id = {}", frame.header.request_id);
-    println!("payload = {:?}", std::str::from_utf8(frame.payload).unwrap());
+    println!(
+        "payload = {:?}",
+        std::str::from_utf8(frame.payload).unwrap()
+    );
 }

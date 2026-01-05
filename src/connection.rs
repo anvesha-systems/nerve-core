@@ -2,17 +2,16 @@
 // from malformed frames to avoid noisy logs.
 // read_exact returns UnexpectedEof when client closes connection normally.
 
-use std::io::{Read};
-use std::os::unix::net::{UnixStream};
+use std::io::Read;
+use std::os::unix::net::UnixStream;
 
 use nerve_protocol::constants::HEADER_SIZE;
 use nerve_protocol::{ProtocolError, frame};
 
-use nerve_protocol::frame::{OwnedFrame};
+use nerve_protocol::frame::OwnedFrame;
 
-use crate::dispatch::{dispatch_frame, DispatchAction};
+use crate::dispatch::{DispatchAction, dispatch_frame};
 use crate::worker_client::WorkerClient;
-
 
 /// Handle a single client connection.
 ///
@@ -20,13 +19,13 @@ use crate::worker_client::WorkerClient;
 /// - client disconnects
 /// - protocol error occurs
 /// - shutdown is requested
-/// 
-/// 
+///
+///
 /// // TODO(v0.2): Suppress logging for clean connection shutdowns (EOF)
 // once read_frame differentiates EOF vs protocol errors.
 pub fn handle_connection(mut stream: UnixStream) -> Result<(), ProtocolError> {
     let mut requests = crate::request_table::RequestTable::new();
-    
+
     // hard coded worker socket
 
     let mut search_worker = match WorkerClient::connect("/tmp/nerve-search-worker.sock") {
@@ -34,7 +33,7 @@ pub fn handle_connection(mut stream: UnixStream) -> Result<(), ProtocolError> {
         Err(e) => {
             eprintln!("failed to connect to search worker: {}", e);
             return Err(ProtocolError::new(
-                nerve_protocol::types::ProtocolErrorKind::MalformedFrame
+                nerve_protocol::types::ProtocolErrorKind::MalformedFrame,
             ));
         }
     };
@@ -57,22 +56,18 @@ pub fn handle_connection(mut stream: UnixStream) -> Result<(), ProtocolError> {
 pub fn read_frame(stream: &mut UnixStream) -> Result<OwnedFrame, ProtocolError> {
     // 1. Read header
     let mut header_buf = [0u8; HEADER_SIZE];
-    stream.read_exact(&mut header_buf)
-        .map_err(|_| ProtocolError::new(
-            nerve_protocol::types::ProtocolErrorKind::MalformedFrame
-        ))?;
+    stream.read_exact(&mut header_buf).map_err(|_| {
+        ProtocolError::new(nerve_protocol::types::ProtocolErrorKind::MalformedFrame)
+    })?;
 
     // 2. Extract payload length
-    let payload_len = u32::from_le_bytes(
-        header_buf[16..20].try_into().unwrap()
-    ) as usize;
+    let payload_len = u32::from_le_bytes(header_buf[16..20].try_into().unwrap()) as usize;
 
     // 3. Read payload
     let mut payload = vec![0u8; payload_len];
-    stream.read_exact(&mut payload)
-        .map_err(|_| ProtocolError::new(
-            nerve_protocol::types::ProtocolErrorKind::MalformedFrame
-        ))?;
+    stream.read_exact(&mut payload).map_err(|_| {
+        ProtocolError::new(nerve_protocol::types::ProtocolErrorKind::MalformedFrame)
+    })?;
 
     // 4. Decode using a temporary buffer
     let mut full_buf = Vec::with_capacity(HEADER_SIZE + payload_len);
@@ -87,7 +82,6 @@ pub fn read_frame(stream: &mut UnixStream) -> Result<OwnedFrame, ProtocolError> 
     })
 }
 
-fn log_protocol_error(err: ProtocolError){
-    eprintln!("NERVE protocol error : {}",err)
+fn log_protocol_error(err: ProtocolError) {
+    eprintln!("NERVE protocol error : {}", err)
 }
-

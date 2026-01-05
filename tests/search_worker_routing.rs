@@ -1,9 +1,9 @@
 use std::io::{Read, Write};
 use std::os::unix::net::UnixListener;
 
-use nerve_protocol::codec::{encode, decode};
-use nerve_protocol::constants::HEADER_SIZE;
 use nerve_protocol::FrameFlags;
+use nerve_protocol::codec::{decode, encode};
+use nerve_protocol::constants::HEADER_SIZE;
 use nerve_protocol::types::{MessageType, RequestId};
 
 fn start_fake_search_worker(path: &str) {
@@ -19,20 +19,15 @@ fn start_fake_search_worker(path: &str) {
         let frame = read_frame_from_stream(&mut stream).unwrap();
         let req_id = RequestId(frame.header.request_id);
 
-
-
-
-
-
-
-// reconstruct full frame to extract request_id
+        // reconstruct full frame to extract request_id
         // ---- emit STREAM ----
         let stream_frame = encode(
             MessageType::SearchResult,
             FrameFlags::STREAM,
             req_id,
             b"result-1",
-        ).unwrap();
+        )
+        .unwrap();
 
         stream.write_all(&stream_frame).unwrap();
 
@@ -42,7 +37,8 @@ fn start_fake_search_worker(path: &str) {
             FrameFlags::FINAL,
             req_id,
             b"result-final",
-        ).unwrap();
+        )
+        .unwrap();
 
         stream.write_all(&final_frame).unwrap();
         stream.flush().unwrap();
@@ -55,16 +51,15 @@ fn start_fake_search_worker(path: &str) {
 fn read_frame_from_stream(
     stream: &mut std::os::unix::net::UnixStream,
 ) -> Option<nerve_protocol::frame::OwnedFrame> {
-    use nerve_protocol::constants::HEADER_SIZE;
     use nerve_protocol::codec::decode;
+    use nerve_protocol::constants::HEADER_SIZE;
 
     let mut header = [0u8; HEADER_SIZE];
     if stream.read_exact(&mut header).is_err() {
         return None;
     }
 
-    let payload_len =
-        u32::from_le_bytes(header[16..20].try_into().unwrap()) as usize;
+    let payload_len = u32::from_le_bytes(header[16..20].try_into().unwrap()) as usize;
 
     let mut payload = vec![0u8; payload_len];
     if stream.read_exact(&mut payload).is_err() {
@@ -75,10 +70,12 @@ fn read_frame_from_stream(
     full.extend_from_slice(&header);
     full.extend_from_slice(&payload);
 
-    decode(&full).ok().map(|f| nerve_protocol::frame::OwnedFrame {
-        header: f.header,
-        payload,
-    })
+    decode(&full)
+        .ok()
+        .map(|f| nerve_protocol::frame::OwnedFrame {
+            header: f.header,
+            payload,
+        })
 }
 
 #[test]
@@ -108,7 +105,8 @@ fn search_query_is_routed_to_worker_and_streamed_back() {
         FrameFlags::empty(),
         RequestId(42),
         b"test query",
-    ).unwrap();
+    )
+    .unwrap();
 
     client.write_all(&query).unwrap();
 
@@ -135,5 +133,4 @@ fn search_query_is_routed_to_worker_and_streamed_back() {
 
     assert!(seen_stream, "did not receive STREAM frame");
     assert!(seen_final, "did not receive FINAL frame");
-   
 }
