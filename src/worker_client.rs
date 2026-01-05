@@ -14,7 +14,10 @@ pub struct WorkerClient {
 impl WorkerClient {
     pub fn connect(path: &str) -> Result<Self, ProtocolError> {
         let stream = UnixStream::connect(path)
-            .map_err(|_| ProtocolError::new(ProtocolErrorKind::InternalError))?;
+            .map_err(|e| {
+                eprintln!("Failed to connect to Unix socket at '{}': {}", path, e);
+                ProtocolError::new(ProtocolErrorKind::InternalError)
+            })?;
         Ok(Self { stream })
     }
 
