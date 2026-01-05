@@ -7,7 +7,6 @@ use std::time::Duration;
 use nerve_protocol::codec::{decode, encode};
 use nerve_protocol::types::{FrameFlags, MessageType, RequestId};
 
-use nerve_core::connection;
 use nerve_core::server;
 
 const SOCKET_PATH: &str = "/tmp/nerve_test.sock";

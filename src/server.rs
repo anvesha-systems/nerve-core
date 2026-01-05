@@ -1,8 +1,10 @@
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::io::Read;
 
 use nerve_protocol::error::ProtocolError;
+use nerve_protocol::constants::HEADER_SIZE;
+use nerve_protocol::frame::OwnedFrame;
 
-use crate::connection::read_frame;
 use crate::dispatch::route_to_worker;
 use crate::dispatch::{DispatchAction, dispatch_frame};
 use crate::request_table::RequestTable;
@@ -61,6 +63,36 @@ pub fn handle_connection(mut client_stream: UnixStream) -> Result<(), ProtocolEr
 fn log_protocol_error(err: ProtocolError) {
     eprintln!("NERVE protocol error: {}", err);
 }
+
+pub fn read_frame(stream: &mut UnixStream) -> Result<OwnedFrame, ProtocolError> {
+    // 1. Read header
+    let mut header_buf = [0u8; HEADER_SIZE];
+    stream.read_exact(&mut header_buf).map_err(|_| {
+        ProtocolError::new(nerve_protocol::types::ProtocolErrorKind::MalformedFrame)
+    })?;
+
+    // 2. Extract payload length
+    let payload_len = u32::from_le_bytes(header_buf[16..20].try_into().unwrap()) as usize;
+
+    // 3. Read payload
+    let mut payload = vec![0u8; payload_len];
+    stream.read_exact(&mut payload).map_err(|_| {
+        ProtocolError::new(nerve_protocol::types::ProtocolErrorKind::MalformedFrame)
+    })?;
+
+    // 4. Decode using a temporary buffer
+    let mut full_buf = Vec::with_capacity(HEADER_SIZE + payload_len);
+    full_buf.extend_from_slice(&header_buf);
+    full_buf.extend_from_slice(&payload);
+
+    let frame = nerve_protocol::codec::decode(&full_buf)?;
+
+    Ok(OwnedFrame {
+        header: frame.header,
+        payload,
+    })
+}
+
 
 pub fn run(path: &str) -> std::io::Result<()> {
     let _ = std::fs::remove_file(path); // avoid bind failure in tests

@@ -80,6 +80,7 @@ fn handle_cancel(frame: Frame<'_>, requests: &mut RequestTable) {
     let _ = requests.cancel(req_id);
 }
 
+
 fn handle_searchquery(
     stream: &mut UnixStream,
     frame: Frame<'_>,
