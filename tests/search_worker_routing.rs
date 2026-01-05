@@ -222,8 +222,9 @@ fn start_fake_search_worker_disconnect_midstream(path: &str) {
         stream.write_all(&stream_frame).unwrap();
         stream.flush().unwrap();
 
-        // ❌ DISCONNECT before sending FINAL
-        drop(stream);
+        // ❌ DISCONNECT before sending FINAL - simulate mid-stream disconnect
+        // Explicitly shutdown to simulate connection loss
+        let _ = stream.shutdown(std::net::Shutdown::Both);
     });
 }
 
