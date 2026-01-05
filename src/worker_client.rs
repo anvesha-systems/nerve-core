@@ -40,7 +40,10 @@ impl WorkerClient {
         full.extend_from_slice(&payload);
 
         let frame = decode(&full)
-            .map_err(|_| ProtocolError::new(ProtocolErrorKind::InternalError))?;
+            .map_err(|e| {
+                eprintln!("Failed to decode frame: {}", e);
+                ProtocolError::new(ProtocolErrorKind::InternalError)
+            })?;
 
         Ok(OwnedFrame {
             header: frame.header,
