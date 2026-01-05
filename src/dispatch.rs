@@ -33,7 +33,8 @@ pub fn dispatch_frame<'a>(
         }
 
         x if x == MessageType::Cancel as u8 => {
-            handle_cancel(frame, requests);
+            let req_id = RequestId(frame.header.request_id);
+            handle_cancel(req_id, requests);
             Ok(DispatchAction::Cancelled(req_id))
         }
 
@@ -186,11 +187,11 @@ pub fn route_to_worker(
             Ok(f) => f,
 
             Err(e) => {
-                // ✅ EOF is OK only AFTER FINAL
+                // EOF is OK only AFTER FINAL
                 if seen_final {
                     return Ok(());
                 }
-                // ❌ otherwise this is a real error
+                // otherwise this is a real error
                 return Err(e);
             }
         };
