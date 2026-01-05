@@ -214,9 +214,7 @@ pub fn route_to_worker(
         )?;
 
         client_stream.write_all(&out)
-            .map_err(|_| ProtocolError::new(
-                nerve_protocol::types::ProtocolErrorKind::InternalError
-            ))?;
+            .map_err(ProtocolError::from)?;
 
         if flags.contains(FrameFlags::FINAL) {
             seen_final = true;
