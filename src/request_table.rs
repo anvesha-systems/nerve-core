@@ -1,30 +1,30 @@
 use std::collections::HashMap;
 
-use nerve_protocol::{request, types::RequestId};
+use nerve_protocol::types::RequestId;
 
 // state of request inside the core
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RequestState{
+pub enum RequestState {
     Active,
     Cancelled,
 }
 
 /// track in-flight requests for a sigle connection
-/// 
+///
 /// v0.1 responsibalities
 /// -track active requests
 /// mark cancelled requests
 /// allow cleanups
 
-pub struct RequestTable{
+pub struct RequestTable {
     requests: HashMap<RequestId, RequestState>,
 }
 
-impl RequestTable{
+impl RequestTable {
     // create a new empty request table
     #[inline]
-    pub fn new() -> Self{
-        Self{
+    pub fn new() -> Self {
+        Self {
             requests: HashMap::new(),
         }
     }
@@ -33,7 +33,7 @@ impl RequestTable{
 
     // returns false if request id already exists
 
-    pub fn insert(&mut self, request_id: RequestId) -> bool{
+    pub fn insert(&mut self, request_id: RequestId) -> bool {
         match self.requests.get(&request_id) {
             Some(_) => false,
             None => {
@@ -44,10 +44,10 @@ impl RequestTable{
     }
 
     // mark an existing request as cancelled
-    // 
+    //
     // returns false if request_id does not exists
 
-    pub fn cancel(&mut self, request_id: RequestId)-> bool{
+    pub fn cancel(&mut self, request_id: RequestId) -> bool {
         match self.requests.get_mut(&request_id) {
             Some(state) => {
                 *state = RequestState::Cancelled;
@@ -58,7 +58,7 @@ impl RequestTable{
     }
 
     // check if the request has been cancelled
-    pub fn is_cancelled(&self, request_id: RequestId)-> bool {
+    pub fn is_cancelled(&self, request_id: RequestId) -> bool {
         matches!(
             self.requests.get(&request_id),
             Some(RequestState::Cancelled)
@@ -71,7 +71,7 @@ impl RequestTable{
     }
 
     // number of tracked request (for diagnostics)
-    pub fn len(&self) -> usize{
+    pub fn len(&self) -> usize {
         self.requests.len()
     }
 
