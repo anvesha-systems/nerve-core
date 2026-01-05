@@ -1,11 +1,11 @@
 #[cfg(test)]
-mod tests{
+mod tests {
     use super::*;
     use nerve_core::request_table::RequestTable;
     use nerve_protocol::types::RequestId;
 
     #[test]
-    fn request_table_lifecycle(){
+    fn request_table_lifecycle() {
         let mut table = RequestTable::new();
         let id = RequestId(1);
 
@@ -18,4 +18,4 @@ mod tests{
         table.remove(id);
         assert!(table.is_empty());
     }
-}    
+}

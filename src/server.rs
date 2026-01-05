@@ -1,12 +1,12 @@
-use std::os::unix::net::{UnixStream, UnixListener};
+use std::os::unix::net::{UnixListener, UnixStream};
 
 use nerve_protocol::error::ProtocolError;
 
-use crate::dispatch::{dispatch_frame, DispatchAction};
+use crate::connection::read_frame;
+use crate::dispatch::route_to_worker;
+use crate::dispatch::{DispatchAction, dispatch_frame};
 use crate::request_table::RequestTable;
 use crate::worker_client::WorkerClient;
-use crate::dispatch::route_to_worker;
-use crate::connection::read_frame;
 
 pub fn handle_connection(mut client_stream: UnixStream) -> Result<(), ProtocolError> {
     let mut requests = RequestTable::new();
@@ -40,9 +40,7 @@ pub fn handle_connection(mut client_stream: UnixStream) -> Result<(), ProtocolEr
 
             DispatchAction::RouteToSearchWorker(frame) => {
                 if search_worker.is_none() {
-                    search_worker = Some(
-                        WorkerClient::connect("/tmp/nerve-search-worker.sock")?
-                    );
+                    search_worker = Some(WorkerClient::connect("/tmp/nerve-search-worker.sock")?);
                 }
 
                 route_to_worker(

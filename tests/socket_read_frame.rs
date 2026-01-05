@@ -3,7 +3,7 @@ use std::os::unix::net::UnixStream;
 use std::thread;
 
 use nerve_protocol::codec::encode;
-use nerve_protocol::types::{MessageType, FrameFlags, RequestId};
+use nerve_protocol::types::{FrameFlags, MessageType, RequestId};
 
 use nerve_core::connection::read_frame; // adjust path if needed
 

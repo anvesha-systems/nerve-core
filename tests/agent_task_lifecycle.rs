@@ -1,12 +1,12 @@
 use std::io::Write;
 use std::os::unix::net::UnixStream;
+use std::path::Path;
 use std::thread;
 use std::time::Duration;
-use std::path::Path;
 
-use nerve_protocol::codec::encode;
-use nerve_protocol::types::{MessageType, FrameFlags, RequestId};
 use nerve_core::server;
+use nerve_protocol::codec::encode;
+use nerve_protocol::types::{FrameFlags, MessageType, RequestId};
 
 const SOCKET_PATH: &str = "/tmp/nerve_agent_task.sock";
 
@@ -36,16 +36,12 @@ fn agent_task_lifecycle_is_accepted() {
         FrameFlags::empty(),
         req_id,
         b"task payload",
-    ).unwrap();
+    )
+    .unwrap();
 
     stream.write_all(&start).unwrap();
 
-    let done = encode(
-        MessageType::AgentTaskDone,
-        FrameFlags::empty(),
-        req_id,
-        &[],
-    ).unwrap();
+    let done = encode(MessageType::AgentTaskDone, FrameFlags::empty(), req_id, &[]).unwrap();
 
     stream.write_all(&done).unwrap();
 
