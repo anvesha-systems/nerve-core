@@ -178,9 +178,8 @@ fn worker_connection_failure_is_handled() {
     // The server should handle this gracefully without crashing
     let result = read_frame_from_stream(&mut client);
     
-    // Either we get no frame (connection closed) or an error frame
-    // The important thing is the server doesn't crash
-    assert!(result.is_none() || result.is_some());
+    // Connection should close cleanly when worker is unavailable
+    assert!(result.is_none(), "Expected connection to close when worker is unavailable");
     
     let _ = std::fs::remove_file(core_sock);
 }
@@ -296,7 +295,7 @@ fn start_fake_search_worker_timeout(path: &str) {
         stream.read_exact(&mut payload).unwrap();
 
         // ❌ NEVER respond - simulate timeout
-        std::thread::sleep(std::time::Duration::from_secs(10));
+        std::thread::sleep(std::time::Duration::from_secs(5));
     });
 }
 
