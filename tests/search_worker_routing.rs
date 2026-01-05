@@ -16,23 +16,16 @@ fn start_fake_search_worker(path: &str) {
         let (mut stream, _) = listener.accept().unwrap();
 
         // ---- read incoming frame ----
-        let mut header = [0u8; HEADER_SIZE];
-        stream.read_exact(&mut header).unwrap();
-
-        let payload_len =
-            u32::from_le_bytes(header[16..20].try_into().unwrap()) as usize;
-
-        let mut payload = vec![0u8; payload_len];
-        stream.read_exact(&mut payload).unwrap();
-
-        // reconstruct full frame to extract request_id
-        let mut full = Vec::with_capacity(HEADER_SIZE + payload_len);
-        full.extend_from_slice(&header);
-        full.extend_from_slice(&payload);
-
-        let frame = decode(&full).unwrap();
+        let frame = read_frame_from_stream(&mut stream).unwrap();
         let req_id = RequestId(frame.header.request_id);
 
+
+
+
+
+
+
+// reconstruct full frame to extract request_id
         // ---- emit STREAM ----
         let stream_frame = encode(
             MessageType::SearchResult,
