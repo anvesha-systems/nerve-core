@@ -6,7 +6,6 @@ use std::time::Duration;
 use nerve_protocol::codec::{decode, encode};
 use nerve_protocol::types::{FrameFlags, MessageType, RequestId};
 
-use nerve_core::connection::read_frame;
 
 #[test]
 
@@ -185,7 +184,7 @@ fn socket_read_frame_roundtrip() {
     });
 
     // read on "server"
-    let owned = read_frame(&mut server).expect("read_frame failed");
+    let owned = nerve_core::server::read_frame(&mut server).expect("read_frame failed");
 
     let frame = owned.as_borrowed();
 

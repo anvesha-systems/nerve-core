@@ -5,8 +5,6 @@ use std::thread;
 use nerve_protocol::codec::encode;
 use nerve_protocol::types::{FrameFlags, MessageType, RequestId};
 
-use nerve_core::connection::read_frame; // adjust path if needed
-
 #[test]
 fn socket_read_frame_roundtrip() {
     // Create a connected UnixStream pair
@@ -28,7 +26,7 @@ fn socket_read_frame_roundtrip() {
     });
 
     // Read on server side using core logic
-    let owned = read_frame(&mut server).expect("read_frame failed");
+    let owned = nerve_core::server::read_frame(&mut server).expect("read_frame failed");
 
     // Convert to borrowed frame
     let frame = owned.as_borrowed();
