@@ -181,7 +181,7 @@ pub fn route_to_worker(
                 req_id,
                 &[],
             )?;
-            let _ = worker.send_raw(&cancel);
+            worker.send_raw(&cancel)?;
             requests.remove(req_id);
             return Ok(());
         }
