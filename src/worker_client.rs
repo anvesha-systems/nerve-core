@@ -23,7 +23,10 @@ impl WorkerClient {
 
     pub fn send_raw(&mut self, buf: &[u8]) -> Result<(), ProtocolError> {
         self.stream.write_all(buf)
-            .map_err(|_| ProtocolError::new(ProtocolErrorKind::InternalError))
+            .map_err(|e| {
+                eprintln!("WorkerClient::send_raw write_all error: {}", e);
+                ProtocolError::new(ProtocolErrorKind::InternalError)
+            })
     }
 
     pub fn read_frame(&mut self) -> Result<OwnedFrame, ProtocolError> {
