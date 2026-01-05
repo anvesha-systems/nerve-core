@@ -33,6 +33,7 @@ pub fn dispatch_frame<'a>(
         }
 
         x if x == MessageType::Cancel as u8 => {
+            let req_id = RequestId(frame.header.request_id);
             handle_cancel(frame, requests);
             Ok(DispatchAction::Cancelled(req_id))
         }
