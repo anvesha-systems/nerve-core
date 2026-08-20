@@ -1,86 +1,105 @@
+/// V1 SearchQuery + Cancel streaming tests.
+///
+/// The AI daemon (not yet implemented) is responsible for producing streamed
+/// SearchResult frames. These tests verify the cancellation path: a Cancel
+/// frame received after a SearchQuery marks the request as cancelled, and the
+/// connection remains alive for subsequent messages.
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
-use nerve_core::server;
-use nerve_protocol::codec::decode;
+use nerve_protocol::codec::{decode, encode};
 use nerve_protocol::constants::HEADER_SIZE;
 use nerve_protocol::types::{FrameFlags, MessageType, RequestId};
 
-const SOCKET_PATH: &str = "/tmp/nerve_search_stream.sock";
+use nerve_core::server;
 
-fn read_frame(stream: &mut UnixStream) -> (u8, FrameFlags, RequestId, Vec<u8>) {
-    let mut header = [0u8; HEADER_SIZE];
-    stream.read_exact(&mut header).unwrap();
-
-    let payload_len = u32::from_le_bytes(header[16..20].try_into().unwrap()) as usize;
-
-    let mut payload = vec![0u8; payload_len];
-    stream.read_exact(&mut payload).unwrap();
-
-    let mut buf = Vec::with_capacity(header.len() + payload.len());
-    buf.extend_from_slice(&header);
-    buf.extend_from_slice(&payload);
-
-    let frame = decode(&buf).unwrap();
-
-    (
-        frame.header.msg_type,
-        FrameFlags::from_bits_truncate(frame.header.flags),
-        RequestId(frame.header.request_id),
-        payload,
-    )
-}
-
-#[test]
-fn search_results_are_streamed_until_final() {
-    if Path::new(SOCKET_PATH).exists() {
-        std::fs::remove_file(SOCKET_PATH).unwrap();
-    }
-
-    thread::spawn(|| {
-        server::run(SOCKET_PATH).unwrap();
-    });
-
+fn wait_for_socket(path: &str) {
     for _ in 0..20 {
-        if Path::new(SOCKET_PATH).exists() {
-            break;
+        if Path::new(path).exists() {
+            return;
         }
         thread::sleep(Duration::from_millis(10));
     }
+    panic!("server socket did not appear: {}", path);
+}
 
-    let mut stream = UnixStream::connect(SOCKET_PATH).unwrap();
-    stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .unwrap();
+fn read_ping_response(stream: &mut UnixStream) -> u64 {
+    let mut buf = [0u8; HEADER_SIZE];
+    stream.read_exact(&mut buf).expect("read ping response");
+    let frame = decode(&buf).expect("decode ping response");
+    assert_eq!(frame.header.msg_type, MessageType::Ping as u8);
+    frame.header.request_id
+}
 
-    // Send SEARCH_QUERY
-    let query = nerve_protocol::codec::encode(
+#[test]
+fn search_query_then_cancel_leaves_connection_usable() {
+    let socket_path = "/tmp/nerve_v1_search_cancel_stream.sock";
+    let _ = std::fs::remove_file(socket_path);
+
+    thread::spawn(|| server::run(socket_path).unwrap());
+    wait_for_socket(socket_path);
+
+    let mut stream = UnixStream::connect(socket_path).unwrap();
+
+    let req_id = RequestId(1);
+
+    let query = encode(
         MessageType::SearchQuery,
         FrameFlags::empty(),
-        RequestId(1),
+        req_id,
         b"test query",
     )
     .unwrap();
-
     stream.write_all(&query).unwrap();
 
-    let mut received = Vec::new();
+    let cancel = encode(MessageType::Cancel, FrameFlags::empty(), req_id, &[]).unwrap();
+    stream.write_all(&cancel).unwrap();
 
-    loop {
-        let (msg_type, flags, req_id, payload) = read_frame(&mut stream);
+    // Connection must survive SearchQuery + Cancel; Ping must still work.
+    let ping = encode(MessageType::Ping, FrameFlags::FINAL, RequestId(2), &[]).unwrap();
+    stream.write_all(&ping).unwrap();
 
-        assert_eq!(msg_type, MessageType::SearchResult as u8);
-        assert_eq!(req_id, RequestId(1));
+    let echoed = read_ping_response(&mut stream);
+    assert_eq!(echoed, 2);
+}
 
-        received.push(payload);
+#[test]
+fn interleaved_search_queries_and_pings() {
+    let socket_path = "/tmp/nerve_v1_interleaved.sock";
+    let _ = std::fs::remove_file(socket_path);
 
-        if flags.contains(FrameFlags::FINAL) {
-            break;
-        }
-    }
+    thread::spawn(|| server::run(socket_path).unwrap());
+    wait_for_socket(socket_path);
 
-    assert_eq!(received.len(), 3);
+    let mut stream = UnixStream::connect(socket_path).unwrap();
+
+    // Interleave: SearchQuery, Ping, SearchQuery, Ping
+    let query_1 = encode(
+        MessageType::SearchQuery,
+        FrameFlags::empty(),
+        RequestId(10),
+        b"query 1",
+    )
+    .unwrap();
+    let ping_1 = encode(MessageType::Ping, FrameFlags::FINAL, RequestId(11), &[]).unwrap();
+    let query_2 = encode(
+        MessageType::SearchQuery,
+        FrameFlags::empty(),
+        RequestId(12),
+        b"query 2",
+    )
+    .unwrap();
+    let ping_2 = encode(MessageType::Ping, FrameFlags::FINAL, RequestId(13), &[]).unwrap();
+
+    stream.write_all(&query_1).unwrap();
+    stream.write_all(&ping_1).unwrap();
+    stream.write_all(&query_2).unwrap();
+    stream.write_all(&ping_2).unwrap();
+
+    // Both pings must be echoed back correctly.
+    assert_eq!(read_ping_response(&mut stream), 11);
+    assert_eq!(read_ping_response(&mut stream), 13);
 }

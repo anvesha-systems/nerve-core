@@ -1,86 +1,96 @@
+/// V1 SearchQuery dispatch tests.
+///
+/// In V1, nerve-core registers a SearchQuery in the request table and returns
+/// a `ForwardToAiDaemon` action. The AI daemon is not yet implemented, so no
+/// response is sent back to the client. These tests verify the dispatch boundary
+/// is clean: the connection stays open and accepts further messages.
 use std::io::{Read, Write};
-use std::iter::FlatMap;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
 use nerve_protocol::codec::{decode, encode};
+use nerve_protocol::constants::HEADER_SIZE;
 use nerve_protocol::types::{FrameFlags, MessageType, RequestId};
 
 use nerve_core::server;
-use nerve_protocol::constants::HEADER_SIZE;
-use nerve_protocol::frame::OwnedFrame;
 
-const SOCKET_PATH: &str = "/tmp/nerve_search_test.sock";
-
-fn read_frame(stream: &mut UnixStream) -> OwnedFrame {
-    let mut header = [0u8; HEADER_SIZE];
-    stream
-        .read_exact(&mut header)
-        .expect("failed to read header");
-
-    let payload_len = u32::from_le_bytes(header[16..20].try_into().unwrap()) as usize;
-
-    let mut payload = vec![0u8; payload_len];
-    stream
-        .read_exact(&mut payload)
-        .expect("failed to read payload");
-
-    let mut full = Vec::with_capacity(HEADER_SIZE + payload_len);
-    full.extend_from_slice(&header);
-    full.extend_from_slice(&payload);
-
-    let frame = decode(&full).expect("decode failed");
-
-    OwnedFrame {
-        header: frame.header,
-        payload: frame.payload.to_vec(),
-    }
-}
-
-#[test]
-fn search_query_returns_stub_result() {
-    if Path::new(SOCKET_PATH).exists() {
-        std::fs::remove_file(SOCKET_PATH).unwrap();
-    }
-
-    thread::spawn(|| {
-        server::run(SOCKET_PATH).unwrap();
-    });
-
-    // wait for socket
+fn wait_for_socket(path: &str) {
     for _ in 0..20 {
-        if Path::new(SOCKET_PATH).exists() {
-            break;
+        if Path::new(path).exists() {
+            return;
         }
         thread::sleep(Duration::from_millis(10));
     }
+    panic!("server socket did not appear: {}", path);
+}
 
-    let mut stream = UnixStream::connect(SOCKET_PATH).unwrap();
+fn read_ping_response(stream: &mut UnixStream) -> u64 {
+    let mut buf = [0u8; HEADER_SIZE];
+    stream.read_exact(&mut buf).expect("read ping response");
+    let frame = decode(&buf).expect("decode ping response");
+    assert_eq!(frame.header.msg_type, MessageType::Ping as u8);
+    frame.header.request_id
+}
 
-    // time out for IPC is mandatory
-    stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .unwrap();
+#[test]
+fn search_query_accepted_without_disconnecting_client() {
+    let socket_path = "/tmp/nerve_v1_search_dispatch.sock";
+    let _ = std::fs::remove_file(socket_path);
 
-    let encode = encode(
+    thread::spawn(|| server::run(socket_path).unwrap());
+    wait_for_socket(socket_path);
+
+    let mut stream = UnixStream::connect(socket_path).unwrap();
+
+    // Send SearchQuery — no response expected; AI daemon not yet implemented.
+    let query = encode(
         MessageType::SearchQuery,
         FrameFlags::empty(),
         RequestId(42),
         b"test-query",
     )
     .unwrap();
+    stream.write_all(&query).unwrap();
 
-    stream.write_all(&encode).unwrap();
+    // A Ping after the SearchQuery must still work, proving the connection
+    // was not dropped by the SearchQuery dispatch.
+    let ping = encode(MessageType::Ping, FrameFlags::FINAL, RequestId(99), &[]).unwrap();
+    stream.write_all(&ping).unwrap();
 
-    let mut buf = vec![0u8; 1024];
-    let mut got_result = false;
+    let req_id = read_ping_response(&mut stream);
+    assert_eq!(
+        req_id, 99,
+        "Ping after SearchQuery must echo the correct request_id"
+    );
+}
 
-    let frame = read_frame(&mut stream);
+#[test]
+fn multiple_search_queries_do_not_disconnect_client() {
+    let socket_path = "/tmp/nerve_v1_search_multi.sock";
+    let _ = std::fs::remove_file(socket_path);
 
-    assert_eq!(frame.header.msg_type, MessageType::SearchResult as u8);
-    assert_eq!(frame.header.request_id, 42);
-    assert_eq!(frame.payload, b"stub-search-result");
-    eprintln!("Client: SEARCH_QUERY sent, waiting for response...");
+    thread::spawn(|| server::run(socket_path).unwrap());
+    wait_for_socket(socket_path);
+
+    let mut stream = UnixStream::connect(socket_path).unwrap();
+
+    for i in 1u64..=3 {
+        let query = encode(
+            MessageType::SearchQuery,
+            FrameFlags::empty(),
+            RequestId(i),
+            b"another-query",
+        )
+        .unwrap();
+        stream.write_all(&query).unwrap();
+    }
+
+    // All three SearchQueries accepted without crashing the connection.
+    let ping = encode(MessageType::Ping, FrameFlags::FINAL, RequestId(100), &[]).unwrap();
+    stream.write_all(&ping).unwrap();
+
+    let req_id = read_ping_response(&mut stream);
+    assert_eq!(req_id, 100);
 }

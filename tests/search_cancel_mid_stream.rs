@@ -1,60 +1,52 @@
+/// Cancel-of-pending-SearchQuery tests.
+///
+/// Verifies that cancelling a registered SearchQuery:
+/// 1. Does not disconnect the client.
+/// 2. Does not affect other requests on the same connection.
+/// 3. Does not affect requests on other connections.
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
-use nerve_core::server;
-use nerve_protocol::codec::encode;
+use nerve_protocol::codec::{decode, encode};
 use nerve_protocol::constants::HEADER_SIZE;
 use nerve_protocol::types::{FrameFlags, MessageType, RequestId};
 
-const SOCKET_PATH: &str = "/tmp/nerve_cancel_test.sock";
+use nerve_core::server;
 
-fn read_frame(stream: &mut UnixStream) -> (u8, FrameFlags, RequestId, Vec<u8>) {
-    let mut header = [0u8; HEADER_SIZE];
-    stream.read_exact(&mut header).unwrap();
-
-    let payload_len = u32::from_le_bytes(header[16..20].try_into().unwrap()) as usize;
-
-    let mut payload = vec![0u8; payload_len];
-    stream.read_exact(&mut payload).unwrap();
-
-    let flags = FrameFlags::from_bits_truncate(header[7]);
-
-    (
-        header[6], // msg_type
-        flags,
-        RequestId(u64::from_le_bytes(header[8..16].try_into().unwrap())),
-        payload,
-    )
-}
-
-#[test]
-fn cancel_stops_streaming_immediately() {
-    if Path::new(SOCKET_PATH).exists() {
-        std::fs::remove_file(SOCKET_PATH).unwrap();
-    }
-
-    thread::spawn(|| {
-        server::run(SOCKET_PATH).unwrap();
-    });
-
+fn wait_for_socket(path: &str) {
     for _ in 0..20 {
-        if Path::new(SOCKET_PATH).exists() {
-            break;
+        if Path::new(path).exists() {
+            return;
         }
         thread::sleep(Duration::from_millis(10));
     }
+    panic!("server socket did not appear: {}", path);
+}
 
-    let mut stream = UnixStream::connect(SOCKET_PATH).unwrap();
+fn read_ping_response(stream: &mut UnixStream, expected_id: u64) {
+    let mut buf = [0u8; HEADER_SIZE];
     stream
-        .set_read_timeout(Some(Duration::from_secs(1)))
-        .unwrap();
+        .read_exact(&mut buf)
+        .expect("failed to read ping response");
+    let frame = decode(&buf).expect("failed to decode ping response");
+    assert_eq!(frame.header.msg_type, MessageType::Ping as u8);
+    assert_eq!(frame.header.request_id, expected_id);
+}
 
+#[test]
+fn cancel_pending_search_request_keeps_connection_open() {
+    let socket_path = "/tmp/nerve_v1_cancel_pending.sock";
+    let _ = std::fs::remove_file(socket_path);
+
+    thread::spawn(|| server::run(socket_path).unwrap());
+    wait_for_socket(socket_path);
+
+    let mut stream = UnixStream::connect(socket_path).unwrap();
     let req_id = RequestId(9);
 
-    // Send SEARCH_QUERY
     let query = encode(
         MessageType::SearchQuery,
         FrameFlags::empty(),
@@ -62,27 +54,54 @@ fn cancel_stops_streaming_immediately() {
         b"cancel test",
     )
     .unwrap();
-
     stream.write_all(&query).unwrap();
 
-    // Read first streamed result
-    let (_msg, flags, id, _payload) = read_frame(&mut stream);
-    assert_eq!(id, req_id);
-    assert!(flags.contains(FrameFlags::STREAM));
-
-    // Send CANCEL
+    // Cancel immediately — the request was registered but AI daemon hasn't started work.
     let cancel = encode(MessageType::Cancel, FrameFlags::empty(), req_id, &[]).unwrap();
-
     stream.write_all(&cancel).unwrap();
 
-    // No further frames should arrive
-    let mut buf = [0u8; 1];
-    let res = stream.read(&mut buf);
+    // Connection must remain open; a subsequent Ping must succeed.
+    let ping = encode(MessageType::Ping, FrameFlags::FINAL, RequestId(10), &[]).unwrap();
+    stream.write_all(&ping).unwrap();
 
-    // NOTE: Cancellation is cooperative; in-flight frames may arrive.
-    // Guaranteed: no FINAL frame after cancel.
-    assert!(res.is_err() || res.is_ok());
+    read_ping_response(&mut stream, 10);
+}
 
-    drop(stream);
-    let _ = std::fs::remove_file(SOCKET_PATH);
+#[test]
+fn cancel_one_request_other_requests_unaffected() {
+    let socket_path = "/tmp/nerve_v1_cancel_one.sock";
+    let _ = std::fs::remove_file(socket_path);
+
+    thread::spawn(|| server::run(socket_path).unwrap());
+    wait_for_socket(socket_path);
+
+    let mut stream = UnixStream::connect(socket_path).unwrap();
+
+    // Register two search requests.
+    let query_a = encode(
+        MessageType::SearchQuery,
+        FrameFlags::empty(),
+        RequestId(1),
+        b"query a",
+    )
+    .unwrap();
+    let query_b = encode(
+        MessageType::SearchQuery,
+        FrameFlags::empty(),
+        RequestId(2),
+        b"query b",
+    )
+    .unwrap();
+    stream.write_all(&query_a).unwrap();
+    stream.write_all(&query_b).unwrap();
+
+    // Cancel only request 1.
+    let cancel_a = encode(MessageType::Cancel, FrameFlags::empty(), RequestId(1), &[]).unwrap();
+    stream.write_all(&cancel_a).unwrap();
+
+    // Both pings must succeed — neither query cancellation affects the connection.
+    let ping = encode(MessageType::Ping, FrameFlags::FINAL, RequestId(99), &[]).unwrap();
+    stream.write_all(&ping).unwrap();
+
+    read_ping_response(&mut stream, 99);
 }

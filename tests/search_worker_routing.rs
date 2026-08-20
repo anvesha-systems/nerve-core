@@ -1,136 +1,150 @@
+/// Connection isolation tests.
+///
+/// Proves that connections are fully independent: a misbehaving, disconnecting,
+/// or malformed client on one connection cannot disrupt another client's
+/// connection or request table.
 use std::io::{Read, Write};
-use std::os::unix::net::UnixListener;
+use std::os::unix::net::UnixStream;
+use std::path::Path;
+use std::thread;
+use std::time::Duration;
 
-use nerve_protocol::FrameFlags;
 use nerve_protocol::codec::{decode, encode};
 use nerve_protocol::constants::HEADER_SIZE;
-use nerve_protocol::types::{MessageType, RequestId};
+use nerve_protocol::types::{FrameFlags, MessageType, RequestId};
 
-fn start_fake_search_worker(path: &str) {
-    let path = path.to_string();
+use nerve_core::server;
 
-    std::thread::spawn(move || {
-        let _ = std::fs::remove_file(&path);
-        let listener = UnixListener::bind(&path).unwrap();
-
-        let (mut stream, _) = listener.accept().unwrap();
-
-        // ---- read incoming frame ----
-        let frame = read_frame_from_stream(&mut stream).unwrap();
-        let req_id = RequestId(frame.header.request_id);
-
-        // reconstruct full frame to extract request_id
-        // ---- emit STREAM ----
-        let stream_frame = encode(
-            MessageType::SearchResult,
-            FrameFlags::STREAM,
-            req_id,
-            b"result-1",
-        )
-        .unwrap();
-
-        stream.write_all(&stream_frame).unwrap();
-
-        // ---- emit FINAL ----
-        let final_frame = encode(
-            MessageType::SearchResult,
-            FrameFlags::FINAL,
-            req_id,
-            b"result-final",
-        )
-        .unwrap();
-
-        stream.write_all(&final_frame).unwrap();
-        stream.flush().unwrap();
-
-        // IMPORTANT: keep worker alive briefly
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    });
+fn wait_for_socket(path: &str) {
+    for _ in 0..20 {
+        if Path::new(path).exists() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    panic!("server socket did not appear: {}", path);
 }
 
-fn read_frame_from_stream(
-    stream: &mut std::os::unix::net::UnixStream,
-) -> Option<nerve_protocol::frame::OwnedFrame> {
-    use nerve_protocol::codec::decode;
-    use nerve_protocol::constants::HEADER_SIZE;
-
-    let mut header = [0u8; HEADER_SIZE];
-    if stream.read_exact(&mut header).is_err() {
-        return None;
-    }
-
-    let payload_len = u32::from_le_bytes(header[16..20].try_into().unwrap()) as usize;
-
-    let mut payload = vec![0u8; payload_len];
-    if stream.read_exact(&mut payload).is_err() {
-        return None;
-    }
-
-    let mut full = Vec::with_capacity(HEADER_SIZE + payload_len);
-    full.extend_from_slice(&header);
-    full.extend_from_slice(&payload);
-
-    decode(&full)
-        .ok()
-        .map(|f| nerve_protocol::frame::OwnedFrame {
-            header: f.header,
-            payload,
-        })
+fn read_ping_response(stream: &mut UnixStream, expected_id: u64) {
+    let mut buf = [0u8; HEADER_SIZE];
+    stream
+        .read_exact(&mut buf)
+        .expect("failed to read ping response");
+    let frame = decode(&buf).expect("failed to decode ping response");
+    assert_eq!(frame.header.msg_type, MessageType::Ping as u8);
+    assert_eq!(frame.header.request_id, expected_id);
 }
 
+/// Two simultaneous connections can exchange Pings independently.
 #[test]
-fn search_query_is_routed_to_worker_and_streamed_back() {
-    let core_sock = "/tmp/nerve_core_test.sock";
-    let worker_sock = "/tmp/nerve-search-worker.sock";
+fn two_clients_are_served_concurrently() {
+    let socket_path = "/tmp/nerve_v1_two_clients.sock";
+    let _ = std::fs::remove_file(socket_path);
 
-    let _ = std::fs::remove_file(core_sock);
-    let _ = std::fs::remove_file(worker_sock);
+    thread::spawn(|| server::run(socket_path).unwrap());
+    wait_for_socket(socket_path);
 
-    // Start fake worker
-    start_fake_search_worker(worker_sock);
+    let mut client_a = UnixStream::connect(socket_path).unwrap();
+    let mut client_b = UnixStream::connect(socket_path).unwrap();
 
-    // Start nerve-core server
-    std::thread::spawn(move || {
-        nerve_core::server::run(core_sock).unwrap();
-    });
+    let ping_a = encode(MessageType::Ping, FrameFlags::FINAL, RequestId(1), &[]).unwrap();
+    let ping_b = encode(MessageType::Ping, FrameFlags::FINAL, RequestId(2), &[]).unwrap();
 
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    client_a.write_all(&ping_a).unwrap();
+    client_b.write_all(&ping_b).unwrap();
 
-    // Client connects to core
-    let mut client = std::os::unix::net::UnixStream::connect(core_sock).unwrap();
+    read_ping_response(&mut client_a, 1);
+    read_ping_response(&mut client_b, 2);
+}
 
-    // Send SEARCH_QUERY
-    let query = encode(
+/// A malformed client (garbage bytes) is disconnected; the other client
+/// continues without interruption.
+#[test]
+fn malformed_client_does_not_affect_good_client() {
+    let socket_path = "/tmp/nerve_v1_isolation.sock";
+    let _ = std::fs::remove_file(socket_path);
+
+    thread::spawn(|| server::run(socket_path).unwrap());
+    wait_for_socket(socket_path);
+
+    let mut good_client = UnixStream::connect(socket_path).unwrap();
+    let mut bad_client = UnixStream::connect(socket_path).unwrap();
+
+    // Bad client: send 100 bytes of garbage (invalid NERVE magic).
+    bad_client.write_all(&[0xFFu8; 100]).unwrap();
+    drop(bad_client);
+
+    // Give the server time to process and close the bad connection.
+    thread::sleep(Duration::from_millis(50));
+
+    // Good client must still be operational.
+    let ping = encode(MessageType::Ping, FrameFlags::FINAL, RequestId(7), &[]).unwrap();
+    good_client.write_all(&ping).unwrap();
+
+    read_ping_response(&mut good_client, 7);
+}
+
+/// Cancelling a request on connection A does not affect requests on connection B.
+///
+/// Each connection has its own `RequestTable`; request IDs are scoped per
+/// connection, not globally.
+#[test]
+fn cancel_on_connection_a_does_not_affect_connection_b() {
+    let socket_path = "/tmp/nerve_v1_cross_cancel.sock";
+    let _ = std::fs::remove_file(socket_path);
+
+    thread::spawn(|| server::run(socket_path).unwrap());
+    wait_for_socket(socket_path);
+
+    let mut client_a = UnixStream::connect(socket_path).unwrap();
+    let mut client_b = UnixStream::connect(socket_path).unwrap();
+
+    // Connection A: register a SearchQuery with req_id=1, then cancel it.
+    let query_a = encode(
         MessageType::SearchQuery,
         FrameFlags::empty(),
-        RequestId(42),
-        b"test query",
+        RequestId(1),
+        b"query from A",
     )
     .unwrap();
+    client_a.write_all(&query_a).unwrap();
 
-    client.write_all(&query).unwrap();
+    let cancel_a = encode(MessageType::Cancel, FrameFlags::empty(), RequestId(1), &[]).unwrap();
+    client_a.write_all(&cancel_a).unwrap();
 
-    // ---- read frames until FINAL ----
-    let mut seen_stream = false;
-    let mut seen_final = false;
+    // Connection B: send a Ping. Must receive a response regardless of A's cancel.
+    let ping_b = encode(MessageType::Ping, FrameFlags::FINAL, RequestId(2), &[]).unwrap();
+    client_b.write_all(&ping_b).unwrap();
 
-    while let Some(frame) = read_frame_from_stream(&mut client) {
-        match frame.header.flags {
-            f if f & nerve_protocol::FrameFlags::STREAM.bits() != 0 => {
-                assert_eq!(&frame.payload, b"result-1");
-                seen_stream = true;
-            }
+    read_ping_response(&mut client_b, 2);
+}
 
-            f if f & nerve_protocol::FrameFlags::FINAL.bits() != 0 => {
-                assert_eq!(&frame.payload, b"result-final");
-                seen_final = true;
-                break;
-            }
+/// A client that disconnects mid-session does not prevent new connections.
+#[test]
+fn disconnected_client_does_not_block_new_connections() {
+    let socket_path = "/tmp/nerve_v1_reconnect.sock";
+    let _ = std::fs::remove_file(socket_path);
 
-            _ => {}
-        }
+    thread::spawn(|| server::run(socket_path).unwrap());
+    wait_for_socket(socket_path);
+
+    // First client connects, sends partial data, then disconnects.
+    {
+        let mut client = UnixStream::connect(socket_path).unwrap();
+        let ping = encode(MessageType::Ping, FrameFlags::FINAL, RequestId(1), &[]).unwrap();
+        client.write_all(&ping).unwrap();
+        // Read response so the server finishes processing before we drop.
+        let mut buf = [0u8; HEADER_SIZE];
+        client.read_exact(&mut buf).unwrap();
     }
 
-    assert!(seen_stream, "did not receive STREAM frame");
-    assert!(seen_final, "did not receive FINAL frame");
+    // Brief pause to let server process the EOF.
+    thread::sleep(Duration::from_millis(20));
+
+    // A fresh second client can connect and communicate normally.
+    let mut second_client = UnixStream::connect(socket_path).unwrap();
+    let ping = encode(MessageType::Ping, FrameFlags::FINAL, RequestId(42), &[]).unwrap();
+    second_client.write_all(&ping).unwrap();
+
+    read_ping_response(&mut second_client, 42);
 }

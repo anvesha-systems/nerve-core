@@ -16,6 +16,7 @@ pub enum RequestState {
 /// mark cancelled requests
 /// allow cleanups
 
+#[derive(Default)]
 pub struct RequestTable {
     requests: HashMap<RequestId, RequestState>,
 }

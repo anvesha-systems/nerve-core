@@ -39,13 +39,13 @@ fn malformed_data_closes_connection() {
 
     // Send invalid data (not a valid NERVE frame)
     let invalid_data = vec![0xFF; 50];
-    let result = client.write_all(&invalid_data);
+    let _result = client.write_all(&invalid_data);
 
     // Write may succeed but connection should close on next read attempt
     thread::sleep(Duration::from_millis(50));
 
     // Try to write again - connection should be closed
-    let ping_attempt = client.write_all(&[0u8; 20]);
+    let _ping_attempt = client.write_all(&[0u8; 20]);
 
     // Connection may or may not still be open, but server logged the error
     drop(client);
