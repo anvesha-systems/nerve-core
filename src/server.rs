@@ -1,9 +1,9 @@
-use std::io::Read;
+use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::thread;
 
 use nerve_protocol::codec::decode;
-use nerve_protocol::constants::HEADER_SIZE;
+use nerve_protocol::constants::{HEADER_SIZE, MAX_PAYLOAD_SIZE};
 use nerve_protocol::error::ProtocolError;
 use nerve_protocol::frame::OwnedFrame;
 use nerve_protocol::types::ProtocolErrorKind;
@@ -11,7 +11,8 @@ use nerve_protocol::types::ProtocolErrorKind;
 use crate::dispatch::{DispatchAction, dispatch_frame};
 use crate::request_table::RequestTable;
 
-/// Handle a single client connection until EOF, a protocol error, or an I/O error.
+/// Handle a single UDS client connection until EOF, a protocol error, or an
+/// I/O error.
 ///
 /// Each connection has its own `RequestTable`; cancellation on one connection
 /// cannot affect another connection's requests.
@@ -29,7 +30,7 @@ pub fn handle_connection(mut client_stream: UnixStream) -> Result<(), ProtocolEr
 
         let borrowed = owned.as_borrowed();
 
-        let action = match dispatch_frame(&mut client_stream, borrowed, &mut requests) {
+        let action = match dispatch_frame(borrowed, &mut requests) {
             Ok(a) => a,
             Err(e) => {
                 log_protocol_error(e);
@@ -40,10 +41,17 @@ pub fn handle_connection(mut client_stream: UnixStream) -> Result<(), ProtocolEr
         match action {
             DispatchAction::Handled => {}
 
+            DispatchAction::Reply(bytes) => {
+                if let Err(e) = client_stream.write_all(&bytes) {
+                    tracing::warn!(error = %e, "UDS write error");
+                    return Ok(());
+                }
+            }
+
             // AI daemon boundary: the request is registered; the daemon will
-            // consume it in a future milestone. Nothing to do here yet.
+            // consume it in a future milestone.
             DispatchAction::ForwardToAiDaemon(req_id) => {
-                tracing::debug!("request {:?} pending AI daemon dispatch", req_id);
+                tracing::debug!(request_id = req_id.0, "SearchQuery pending AI daemon");
             }
         }
     }
@@ -54,6 +62,9 @@ fn log_protocol_error(err: ProtocolError) {
 }
 
 /// Read one complete NERVE frame from `stream`.
+///
+/// Validates payload size before allocation to prevent a large-allocation DoS
+/// when an untrusted client claims a huge `payload_length`.
 pub fn read_frame(stream: &mut UnixStream) -> Result<OwnedFrame, ProtocolError> {
     let mut header_buf = [0u8; HEADER_SIZE];
     stream
@@ -61,6 +72,11 @@ pub fn read_frame(stream: &mut UnixStream) -> Result<OwnedFrame, ProtocolError> 
         .map_err(|_| ProtocolError::new(ProtocolErrorKind::MalformedFrame))?;
 
     let payload_len = u32::from_le_bytes(header_buf[16..20].try_into().unwrap()) as usize;
+
+    // Validate size BEFORE allocating — prevents a DoS via a crafted header.
+    if payload_len > MAX_PAYLOAD_SIZE {
+        return Err(ProtocolError::new(ProtocolErrorKind::PayloadTooLarge));
+    }
 
     let mut payload = vec![0u8; payload_len];
     stream

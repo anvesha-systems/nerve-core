@@ -1,28 +1,28 @@
-use std::io::Write;
-use std::os::unix::net::UnixStream;
-
 use nerve_protocol::codec::encode;
-use nerve_protocol::types::{FrameFlags, MessageType, ProtocolErrorKind, RequestId};
+use nerve_protocol::types::{FrameFlags, MessageType, RequestId};
 use nerve_protocol::{Frame, ProtocolError};
 
 use crate::request_table::RequestTable;
 
 /// Outcome returned to the connection loop after dispatching a frame.
 pub enum DispatchAction {
-    /// Frame was handled inline; no further action needed.
+    /// Frame was handled and requires no response.
     Handled,
+    /// Frame generated a response; the transport must send these bytes.
+    Reply(Vec<u8>),
     /// SearchQuery was received and registered. The future AI daemon should
-    /// process this request. The request_id is already in the request table.
+    /// process this request. The `request_id` is already in the request table.
     ForwardToAiDaemon(RequestId),
 }
 
 /// Dispatch a single decoded frame and return the action to take.
 ///
-/// This function must be fast, non-blocking, and deterministic.
-/// Business logic that belongs to the AI daemon is NOT handled here;
-/// those frames are returned as `ForwardToAiDaemon`.
+/// This function is transport-agnostic: it does not perform any I/O.
+/// The caller is responsible for sending any `Reply` bytes back to the client,
+/// whether over a Unix socket or a WebSocket.
+///
+/// Must be fast, non-blocking, and deterministic.
 pub fn dispatch_frame(
-    stream: &mut UnixStream,
     frame: Frame<'_>,
     requests: &mut RequestTable,
 ) -> Result<DispatchAction, ProtocolError> {
@@ -33,8 +33,8 @@ pub fn dispatch_frame(
 
     match msg_type {
         MessageType::Ping => {
-            handle_ping(stream, frame)?;
-            Ok(DispatchAction::Handled)
+            let bytes = encode_ping_reply(frame)?;
+            Ok(DispatchAction::Reply(bytes))
         }
 
         MessageType::Cancel => {
@@ -43,7 +43,7 @@ pub fn dispatch_frame(
         }
 
         // SearchQuery belongs to the AI daemon layer. Register the request
-        // here so cancellation works, but do not process it inline.
+        // here so cancellation works, then let the caller forward it.
         MessageType::SearchQuery => {
             let req_id = RequestId(frame.header.request_id);
             requests.insert(req_id);
@@ -51,66 +51,35 @@ pub fn dispatch_frame(
         }
 
         MessageType::AgentTaskStart => {
-            handle_agent_task_start(frame, requests)?;
+            let req_id = RequestId(frame.header.request_id);
+            requests.insert(req_id);
             Ok(DispatchAction::Handled)
         }
 
-        MessageType::AgentTaskEvent => {
-            handle_agent_task_event(frame, requests)?;
-            Ok(DispatchAction::Handled)
-        }
+        MessageType::AgentTaskEvent => Ok(DispatchAction::Handled),
 
         MessageType::AgentTaskDone => {
-            handle_agent_task_done(frame, requests)?;
+            let req_id = RequestId(frame.header.request_id);
+            requests.remove(req_id);
             Ok(DispatchAction::Handled)
         }
 
-        // AiToken and SearchResult flow from the AI daemon to the client, not
-        // from the client to the core. Ignore if received in this direction.
+        // AiToken / SearchResult flow from the AI daemon to the client.
+        // Ignore if received in this direction.
         _ => Ok(DispatchAction::Handled),
     }
 }
 
-fn handle_ping(stream: &mut UnixStream, frame: Frame<'_>) -> Result<(), ProtocolError> {
-    let response = encode(
+fn encode_ping_reply(frame: Frame<'_>) -> Result<Vec<u8>, ProtocolError> {
+    encode(
         MessageType::Ping,
         FrameFlags::FINAL,
         RequestId(frame.header.request_id),
         frame.payload,
-    )?;
-
-    stream
-        .write_all(&response)
-        .map_err(|_| ProtocolError::new(ProtocolErrorKind::InternalError))?;
-    Ok(())
+    )
 }
 
 fn handle_cancel(frame: Frame<'_>, requests: &mut RequestTable) {
     let req_id = RequestId(frame.header.request_id);
     requests.cancel(req_id);
-}
-
-fn handle_agent_task_start(
-    frame: Frame<'_>,
-    requests: &mut RequestTable,
-) -> Result<(), ProtocolError> {
-    let req_id = RequestId(frame.header.request_id);
-    requests.insert(req_id);
-    Ok(())
-}
-
-fn handle_agent_task_event(
-    _frame: Frame<'_>,
-    _requests: &RequestTable,
-) -> Result<(), ProtocolError> {
-    Ok(())
-}
-
-fn handle_agent_task_done(
-    frame: Frame<'_>,
-    requests: &mut RequestTable,
-) -> Result<(), ProtocolError> {
-    let req_id = RequestId(frame.header.request_id);
-    requests.remove(req_id);
-    Ok(())
 }
