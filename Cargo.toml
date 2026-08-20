@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-nerve-protocol = { path = "../nerve", package = "nerve" }
+# nerve: NERVE binary framing + V1 message schema
+# Pinned commit: 5e7b88780b45dcbfa1c9228c7845f2c89112b043
+nerve-protocol = { git = "https://github.com/anvesha-systems/nerve.git", rev = "5e7b88780b45dcbfa1c9228c7845f2c89112b043", package = "nerve" }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 tungstenite = "0.24"

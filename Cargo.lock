@@ -140,6 +140,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 [[package]]
 name = "nerve"
 version = "0.2.0"
+source = "git+https://github.com/anvesha-systems/nerve.git?rev=5e7b88780b45dcbfa1c9228c7845f2c89112b043#5e7b88780b45dcbfa1c9228c7845f2c89112b043"
 dependencies = [
  "bitflags",
  "serde",
